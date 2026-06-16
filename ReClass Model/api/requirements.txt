@@ -1,0 +1,23 @@
+# API & reviewer-workflow component dependencies.
+#
+# Kept OUT of the shared `ReClass Model/requirements.txt` so the service layer can
+# be installed independently. Install with:
+#
+#     ../.venv/bin/python -m pip install -r api/requirements.txt
+#
+# The API is a thin layer over the existing pure engine + storage layer. These
+# are the only third-party additions it needs.
+
+# FastAPI app + ASGI server.
+# Current checked PyPI versions: fastapi 0.137.1, uvicorn 0.49.0.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+
+# Starlette's TestClient (used by tests/test_api.py) needs httpx.
+# Current checked PyPI version: httpx 0.28.1.
+httpx>=0.27,<1
+
+# NOTE: the clinical/DB-backed store additionally needs psycopg, which is already
+# declared in the shared `requirements.txt`. The API and its tests run fully
+# WITHOUT a live database (an in-memory store is injected), so psycopg is only
+# required to serve real clinical traffic, not to import the app or run the suite.

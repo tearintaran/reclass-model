@@ -1,0 +1,470 @@
+{
+  "benchmark": "synthetic_v1",
+  "engine_version": "1.0.0",
+  "note": "Synthetic, rule-derived benchmark for harness validation only. Not a clinical concordance figure.",
+  "cases": [
+    {
+      "id": "P-01",
+      "gene": "BRCA1",
+      "ancestry": "European",
+      "expected": "Pathogenic",
+      "signals": {
+        "gnomad_af": 1e-06,
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong"
+          },
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          }
+        ]
+      }
+    },
+    {
+      "id": "P-02",
+      "gene": "MLH1",
+      "ancestry": "African",
+      "expected": "Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong"
+          },
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PM2",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "P-03",
+      "gene": "RYR1",
+      "ancestry": "European",
+      "expected": "Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong"
+          },
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PM2",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "P-04",
+      "gene": "COL1A1",
+      "ancestry": "Latino",
+      "expected": "Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong"
+          },
+          {
+            "criterion": "PM1",
+            "direction": "pathogenic",
+            "strength": "moderate"
+          },
+          {
+            "criterion": "PM2",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LP-01",
+      "gene": "MYH7",
+      "ancestry": "European",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "revel": 0.7,
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LP-02",
+      "gene": "TP53",
+      "ancestry": "East Asian",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PM1",
+            "direction": "pathogenic",
+            "strength": "moderate"
+          },
+          {
+            "criterion": "PP3",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LP-03",
+      "gene": "SCN5A",
+      "ancestry": "Latino",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PM1",
+            "direction": "pathogenic",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LP-04",
+      "gene": "KCNQ1",
+      "ancestry": "South Asian",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PM1",
+            "direction": "pathogenic",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LP-05",
+      "gene": "LDLR",
+      "ancestry": "African",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong"
+          },
+          {
+            "criterion": "PP3",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LP-06",
+      "gene": "PKP2",
+      "ancestry": "East Asian",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PM1",
+            "direction": "pathogenic",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B-01",
+      "gene": "AF_COMMON1",
+      "ancestry": "European",
+      "expected": "Benign",
+      "signals": {
+        "gnomad_af": 0.08
+      }
+    },
+    {
+      "id": "B-02",
+      "gene": "AF_COMMON2",
+      "ancestry": "South Asian",
+      "expected": "Benign",
+      "signals": {
+        "gnomad_af": 0.06
+      }
+    },
+    {
+      "id": "B-03",
+      "gene": "RARE2",
+      "ancestry": "European",
+      "expected": "Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BS2",
+            "direction": "benign",
+            "strength": "strong"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B-04",
+      "gene": "POLY1",
+      "ancestry": "East Asian",
+      "expected": "Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BS2",
+            "direction": "benign",
+            "strength": "strong"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B-05",
+      "gene": "POLY2",
+      "ancestry": "South Asian",
+      "expected": "Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BS2",
+            "direction": "benign",
+            "strength": "strong"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LB-01",
+      "gene": "RARE1",
+      "ancestry": "South Asian",
+      "expected": "Likely Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BP1",
+            "direction": "benign",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LB-02",
+      "gene": "RARE3",
+      "ancestry": "Latino",
+      "expected": "Likely Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BP1",
+            "direction": "benign",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LB-03",
+      "gene": "XLB4",
+      "ancestry": "European",
+      "expected": "Likely Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BP4",
+            "direction": "benign",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "LB-04",
+      "gene": "XLB5",
+      "ancestry": "African",
+      "expected": "Likely Benign",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "BS1",
+            "direction": "benign",
+            "strength": "strong"
+          },
+          {
+            "criterion": "BP4",
+            "direction": "benign",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "VUS-01",
+      "gene": "UNK1",
+      "ancestry": "European",
+      "expected": "VUS",
+      "signals": {
+        "criteria": []
+      }
+    },
+    {
+      "id": "VUS-02",
+      "gene": "UNK2",
+      "ancestry": "African",
+      "expected": "VUS",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PM1",
+            "direction": "pathogenic",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "VUS-03",
+      "gene": "UNK3",
+      "ancestry": "East Asian",
+      "expected": "VUS",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PP3",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "VUS-04",
+      "gene": "UNK4",
+      "ancestry": "Latino",
+      "expected": "VUS",
+      "signals": {
+        "criteria": []
+      }
+    },
+    {
+      "id": "NM-01",
+      "gene": "NF1",
+      "ancestry": "African",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          },
+          {
+            "criterion": "PP3",
+            "direction": "pathogenic",
+            "strength": "supporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "NM-02",
+      "gene": "DSP",
+      "ancestry": "African",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong"
+          }
+        ]
+      }
+    }
+  ]
+}

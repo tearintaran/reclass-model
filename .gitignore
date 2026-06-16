@@ -1,0 +1,91 @@
+# .gitignore — repository hygiene + data governance policy.
+#
+# This repository is NOT yet under git (see ReClass Model/docs/data_governance.md).
+# This file is forward-looking: it activates the moment `git init` is run. The
+# committable vs regenerable/local policy it encodes is mirrored by the commit guard
+# `ReClass Model/ops/repo_guard.py` and documented in docs/data_governance.md.
+#
+# Rule of thumb:
+#   * COMMIT: source code, docs/READMEs, small benchmark fixtures, source checksums.
+#   * IGNORE: large raw source data, reference genomes, provider caches, and every
+#             regenerable artifact (plots, validation reports, enriched copies).
+
+# --------------------------------------------------------------------------- #
+# Python
+# --------------------------------------------------------------------------- #
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --------------------------------------------------------------------------- #
+# Virtual environments
+# --------------------------------------------------------------------------- #
+.venv/
+.venv-*/
+venv/
+env/
+
+# --------------------------------------------------------------------------- #
+# OS / editor cruft
+# --------------------------------------------------------------------------- #
+.DS_Store
+*.swp
+*~
+
+# --------------------------------------------------------------------------- #
+# Reference genome FASTA cache (multi-GB; NEVER commit). Keep only the README.
+# These patterns are global so a FASTA dropped anywhere is caught.
+# --------------------------------------------------------------------------- #
+*.fa
+*.fasta
+*.fai
+*.2bit
+ReClass Model/data/reference/*
+!ReClass Model/data/reference/README.md
+
+# --------------------------------------------------------------------------- #
+# Raw, local-only source data (large public downloads; NEVER commit).
+# Keep the README and the upstream checksums so the snapshot is reproducible.
+# --------------------------------------------------------------------------- #
+ReClass Model/data/raw/*
+!ReClass Model/data/raw/README.md
+!ReClass Model/data/raw/*.md5
+
+# Common bulk archive / genomics file shapes, wherever they appear.
+*.zip
+*.gz
+*.bgz
+*.tar
+*.tar.gz
+*.vcf
+*.vcf.gz
+*.bcf
+*.bam
+*.cram
+
+# --------------------------------------------------------------------------- #
+# Provider caches (regenerable from public sources via ingest/*). Keep README.
+# --------------------------------------------------------------------------- #
+ReClass Model/data/cache/providers/*
+!ReClass Model/data/cache/providers/README.md
+
+# --------------------------------------------------------------------------- #
+# Generated, regenerable artifacts (NOT source of business logic).
+# --------------------------------------------------------------------------- #
+plots/
+ReClass Model/validation/reports/
+
+# --------------------------------------------------------------------------- #
+# Private / clinical data — must NEVER be committed (defense in depth; the
+# clinical schema lives in PostgreSQL, not in the repo).
+# --------------------------------------------------------------------------- #
+**/data/private/
+*.phi
+*.phi.json
+*_patient*.csv
+*_mrn*.csv
+
+# Committed ON PURPOSE (small benchmark snapshots; see docs/data_governance.md):
+#   ReClass Model/validation/fixtures/*.json  -> tracked, not ignored.

@@ -1,0 +1,24 @@
+# Standardized Variant Reclassification Engine — dependencies
+#
+# The core engine, normalization, monitoring, validation harness, and most of the
+# unit test suite use ONLY the Python standard library. There is nothing to
+# install to run them.
+#
+# The storage layer (storage/, db/apply.py) and its PostgreSQL integration tests
+# (tests/test_storage.py) DO require psycopg. API dependencies live in
+# api/requirements.txt so the service layer can be installed independently.
+
+# --- Storage layer: db/schema.sql + storage/ against PostgreSQL 16 ---
+# Required for the storage layer and tests/test_storage.py (they skip without it).
+# Current checked PyPI version: psycopg-binary 3.3.4
+psycopg[binary]>=3.3,<4
+
+# --- Diagnostic plots: validation/plots.py + harness plot output ---
+# Required to render the PNG diagnostics into plots/. The harness prints a hint
+# and continues if it is missing; the gate never depends on plotting.
+# Current checked PyPI version: matplotlib 3.11.0
+matplotlib>=3.8,<4
+
+# --- Optional: developer tooling ---
+# Current checked PyPI version: pytest 9.1.0
+# pytest>=9.1,<10
