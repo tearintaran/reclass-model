@@ -22,7 +22,13 @@ Public surface:
 
 from __future__ import annotations
 
-from .model import EvidenceBundle, event_from_dict, event_to_dict
+from .model import (
+    CohortCounts,
+    EvidenceBundle,
+    TranscriptIdentity,
+    event_from_dict,
+    event_to_dict,
+)
 from .providers import EvidenceProvider
 from .clingen import (
     ClinGenEvidenceProvider,
@@ -31,9 +37,24 @@ from .clingen import (
     PROVIDER_VERSION,
     event_to_criterion,
 )
+from .upstream import (
+    CaseControlAdapter,
+    DeNovoAdapter,
+    DiseaseMechanismAdapter,
+    FunctionalAssayAdapter,
+    FunctionalPhenotypeCache,
+    PhasingAdapter,
+    PhenotypeAdapter,
+    SegregationAdapter,
+    UpstreamEvidenceAdapter,
+    UpstreamEvidenceProvider,
+    derive_upstream_events,
+)
 
 __all__ = [
     "EvidenceBundle",
+    "TranscriptIdentity",
+    "CohortCounts",
     "EvidenceProvider",
     "ClinGenIndex",
     "ClinGenEvidenceProvider",
@@ -42,4 +63,15 @@ __all__ = [
     "event_to_dict",
     "event_from_dict",
     "event_to_criterion",
+    "UpstreamEvidenceAdapter",
+    "UpstreamEvidenceProvider",
+    "DeNovoAdapter",
+    "PhasingAdapter",
+    "SegregationAdapter",
+    "PhenotypeAdapter",
+    "FunctionalAssayAdapter",
+    "DiseaseMechanismAdapter",
+    "CaseControlAdapter",
+    "FunctionalPhenotypeCache",
+    "derive_upstream_events",
 ]

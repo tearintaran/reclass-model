@@ -1,0 +1,10 @@
+{
+  "split": "holdout",
+  "fixtures": [
+    {
+      "benchmark": "holdout_smoke_v1",
+      "path": "holdout_smoke_v1.json",
+      "purpose": "Reserved holdout smoke fixture used to exercise anti-leakage guardrails."
+    }
+  ]
+}

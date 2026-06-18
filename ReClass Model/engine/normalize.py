@@ -133,6 +133,43 @@ def provider_key_of(key: str) -> str:
     return strip_build(key)[1]
 
 
+# --------------------------------------------------------------------------- #
+# Transcript identity normalization (job1 task 3: MANE/HGVS transcript route)  #
+# --------------------------------------------------------------------------- #
+def normalize_transcript(transcript: Any) -> Optional[str]:
+    """Version-stripped, upper-cased transcript accession, or None.
+
+    ``NM_000277.3`` and ``nm_000277.4`` both normalize to ``NM_000277`` so two
+    sources that name the same MANE Select transcript at different *versions* still
+    join. The version is intentionally dropped from the match key (a c.HGVS on a
+    transcript means the same edit regardless of the transcript's minor version);
+    keep the full versioned accession alongside when version-exact identity matters.
+    """
+    if transcript is None:
+        return None
+    s = str(transcript).strip()
+    if not s:
+        return None
+    return s.split(".")[0].upper()
+
+
+def transcript_hgvs_key(transcript: Any, hgvs_c: Any) -> Optional[str]:
+    """Identity key for a (MANE) transcript + coding HGVS, version-stripped.
+
+    ``('NM_000277.3', 'c.1A>G')`` -> ``'NM_000277:c.1A>G'``. Returns None when either
+    component is missing, so a record with no usable transcript identity simply does
+    not key (an honest miss, never a guess). Internal whitespace in the coding HGVS is
+    collapsed so cosmetically different spellings of the same edit still join.
+    """
+    t = normalize_transcript(transcript)
+    if not t or hgvs_c is None:
+        return None
+    c = "".join(str(hgvs_c).split())
+    if not c:
+        return None
+    return f"{t}:{c}"
+
+
 def _validate_allele(allele: str, kind: str) -> None:
     if not allele or not _VALID_ALLELE.match(allele.upper()):
         raise ValueError(f"invalid {kind} allele: {allele!r} (expected non-empty A/C/G/T/N)")

@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "label": "Computational evidence extension v1 — AlphaMissense, conservation, gene constraint",
+  "description": "Reviewable thresholds for high-value computational predictors beyond REVEL (gap.md A3): AlphaMissense (missense PP3/BP4), phyloP/phastCons conservation (supporting computational), and gnomAD gene-level constraint (LOEUF/pLI/missense-Z, a context modifier feeding PVS1/PM2 reasoning). A SEPARATE versioned config from base_v1.json (clinical sign-off) and coverage_ext_v1.json: it only adds derivation thresholds for new computational providers and never alters the base point model, tier cutoffs, or reconstruction hashes. Emitted criteria reuse the engine's standard strength keys so the pure scoring engine sums them unchanged. ACMG/AMP guidance is that multiple in-silico missense predictors must NOT be stacked into independent criteria; missense_consensus encodes a single combined PP3/BP4 from REVEL + AlphaMissense, with a documented, configurable rule when they disagree (never a silent average).",
+  "provenance": {
+    "alphamissense": "Cheng et al. 2023 (AlphaMissense) likely-pathogenic/ambiguous/likely-benign class boundaries (>=0.564 / 0.34-0.564 / <=0.34), with SVI-style (Pejaver et al. 2022) confidence -> strength binning.",
+    "conservation": "phyloP (vertebrate) / phastCons conservation as supporting computational evidence; conservation alone is weak and is capped at supporting per ACMG/AMP 2015 (Richards et al.) and SVI computational-evidence guidance.",
+    "constraint": "gnomAD v4 gene constraint: LOEUF (loss-of-function observed/expected upper bound), pLI, and regional missense Z. Used as a CONTEXT modifier (e.g. confirming a LoF disease mechanism for PVS1, or supporting PM2 reasoning), not as a standalone ACMG criterion.",
+    "missense_consensus": "ClinGen SVI recommendation that in-silico predictors contribute a single PP3/BP4; the disagreement policy is a local, documented, reviewable choice.",
+    "status": "Reconstructed, reviewable defaults. Confirm against the current ClinGen SVI / predictor calibrations before clinical use. Strength keys are constrained to the base engine's STRENGTH_POINTS."
+  },
+  "alphamissense": {
+    "comment": "AlphaMissense pathogenicity score in [0,1] -> PP3 (pathogenic) / BP4 (benign). pp3 bins are evaluated high threshold first (score >= threshold); bp4 bins low threshold first (score <= threshold). The 0.34-0.564 ambiguous band yields no criterion.",
+    "pp3": [[0.99, "moderate"], [0.564, "supporting"]],
+    "bp4": [[0.07, "moderate"], [0.34, "supporting"]]
+  },
+  "conservation": {
+    "comment": "phyloP vertebrate conservation -> supporting computational evidence. A highly conserved position supports PP3_Supporting; a fast-evolving (non-conserved) position supports BP4_Supporting. Capped at supporting because conservation alone is weak and is already an input to meta-predictors (do not stack with REVEL/AlphaMissense for the same variant).",
+    "phylop_pp3": [[1.6, "supporting"]],
+    "phylop_bp4": [[0.0, "supporting"]]
+  },
+  "constraint": {
+    "comment": "Gene-level constraint context (gnomAD). A gene is LoF-constrained when LOEUF <= loeuf_constrained OR pLI >= pli_constrained; missense-constrained when regional missense Z >= missense_z_constrained. Context only: classifies the gene so the consensus / PVS1 logic can use it, and emits NO independent ACMG criterion.",
+    "loeuf_constrained": 0.35,
+    "pli_constrained": 0.9,
+    "missense_z_constrained": 3.09
+  },
+  "missense_consensus": {
+    "comment": "Resolution of REVEL + AlphaMissense into ONE PP3/BP4 (predictors are not stacked). agreement_combine='stronger' takes the stronger of the two concordant calls. disagreement_policy on a path-vs-benign conflict: 'conservative' = no call (default; documented, never a silent average), 'revel' = trust REVEL, 'alphamissense' = trust AlphaMissense.",
+    "agreement_combine": "stronger",
+    "disagreement_policy": "conservative"
+  }
+}

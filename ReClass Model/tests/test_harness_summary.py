@@ -127,6 +127,17 @@ class TestCaseEvidence(unittest.TestCase):
         self.assertTrue(ev["has_clingen"])  # provider implies clingen evidence
         self.assertEqual(ev["providers"], ["clingen_erepo"])
 
+    def test_fallback_enrichment_uses_authoritative_matched_flag(self):
+        case = _case("1", "GENE", "Unspecified", "Benign", signals={"criteria": []},
+                     enrichment={"clingen_variation_id_match": False,
+                                 "matched": True,
+                                 "route": "hgvs_g",
+                                 "providers": ["clingen_erepo"]})
+        ev = H.case_evidence(case)
+        self.assertTrue(ev["enriched"])
+        self.assertTrue(ev["matched"])
+        self.assertTrue(ev["has_clingen"])
+
     def test_unmatched_enrichment(self):
         case = _case("1", "GENE", "Unspecified", "Benign", signals={"criteria": []},
                      enrichment={"clingen_variation_id_match": False, "providers": []})

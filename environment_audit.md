@@ -1,6 +1,8 @@
 # Environment Audit
 
-Last updated: 2026-06-16, America/Phoenix.
+Last updated: 2026-06-17 for project verification. The Homebrew/system inventory
+below remains the 2026-06-16 America/Phoenix environment audit unless a line
+explicitly says it was rechecked in the project verification pass.
 
 This document records the current Python, pip, terminal, Homebrew, and project
 validation state after the environment refresh and the completed evidence,
@@ -18,12 +20,14 @@ Checked project dependency manifests and developer tooling:
 - Shell startup files for bash and zsh
 - Homebrew, Python, pip, PostgreSQL, Git, and Apple Command Line Tools
 
-No `pyproject.toml`, `setup.py`, `Pipfile`, `poetry.lock`, `package.json`,
-`go.mod`, `Cargo.toml`, or other package-manager manifests are present in this
-repo snapshot.
+`ReClass Model/pyproject.toml` is now present and makes the project installable
+with a `reclass` console entry point. No `setup.py`, `Pipfile`, `poetry.lock`,
+`package.json`, `go.mod`, `Cargo.toml`, or other package-manager manifests are
+present in this repo snapshot.
 
-This project folder is not currently inside a Git repository, so status review was
-done by filesystem inspection rather than `git status`.
+This project folder is now a Git repository (the initial commit is present), so
+status review can be done with `git status`. The `ops/repo_guard.py` commit-hygiene
+check is wired and verified as the `.git/hooks/pre-commit` hook.
 
 ## External Version Checks
 
@@ -185,25 +189,34 @@ Validated from `ReClass Model/` with the rebuilt `.venv`:
 
 Results:
 
-- Unit/integration suite: 389 tests, all passing.
-- Synthetic benchmark: GATE PASS, 90.5% definitive concordance, 0 serious
-  discordances, 92.0% overall exact concordance.
+- Unit/integration suite: 781 tests, all passing. Rechecked 2026-06-17 with
+  `../.venv/bin/python -m unittest discover -s tests -v`.
+- Ruff: `../.venv/bin/python -m ruff check .` passed. Rechecked 2026-06-17.
+- Mypy: `../.venv/bin/python -m mypy` passed for the configured engine gate.
+  Rechecked 2026-06-17.
+- Synthetic benchmark: GATE PASS, 92.9% definitive concordance, 0 serious
+  discordances, 93.8% overall exact concordance. Rechecked 2026-06-17.
 - ClinGen real benchmark: GATE PASS, 94.7% definitive concordance, 4 serious
   discordances, 93.0% overall exact concordance.
 - ClinVar raw benchmark: GATE FAIL as expected, 5.0% definitive concordance, 34
   serious discordances, 19.9% overall exact concordance.
-- ClinVar enriched benchmark: GATE FAIL as expected, but improved to 37.8%
-  definitive concordance, 9 serious discordances, 43.3% overall exact concordance.
-- Raw vs enriched comparison: definitive concordance +32.8 percentage points,
-  overall exact concordance +23.5 percentage points, serious discordance count -25.
-- Reference cache status helper: works and reports the default GRCh38 FASTA as
-  missing until a local FASTA is supplied.
+- ClinVar enriched benchmark: GATE FAIL as expected, but improved to 42.4%
+  definitive concordance, 6 serious discordances, 46.6% overall exact concordance.
+- Raw vs enriched comparison: definitive concordance +37.4 percentage points,
+  overall exact concordance +26.7 percentage points, serious discordance count -28
+  (34 to 6).
+- Reference cache status helper: a local GRCh38 FASTA (Ensembl release-110) is now
+  installed and reported present; identity audits were re-run reference-backed.
 - Calibration reports: generated for ClinGen real and enriched ClinVar, including
   low-performing groups, serious-discordance triage, and threshold sensitivity.
 - REVEL and gnomAD provider tests: pass offline with mocked/local data.
 - API/reporting tests: pass without requiring a live database.
 - Storage/ops/reanalysis tests: pass against PostgreSQL in the current environment.
-- Schema apply: succeeds against the local `reclass_dev` PostgreSQL database.
+- Schema apply and migration ledger: succeed against the local PostgreSQL
+  environment.
+- Database backup/restore rehearsal: `tests.test_db_migrations` passed against
+  PostgreSQL, including a real backup, restore into a fresh database, reconstruction
+  verification, and RLS isolation checks.
 - Diagnostic plot generation: works and writes PNG diagnostics.
 
 ## Remaining Environment Warnings
@@ -238,6 +251,8 @@ From `ReClass Model/`:
 
 ```bash
 ../.venv/bin/python -m unittest discover -s tests -v
+../.venv/bin/python -m ruff check .
+../.venv/bin/python -m mypy
 ../.venv/bin/python validation/harness.py
 ../.venv/bin/python validation/harness.py clingen_real_v1
 ../.venv/bin/python validation/harness.py clinvar_real_v1

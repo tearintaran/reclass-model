@@ -1,0 +1,10 @@
+{
+  "split": "development",
+  "fixtures": [
+    {
+      "benchmark": "synthetic_v1",
+      "path": "synthetic_v1.json",
+      "purpose": "Fast deterministic development fixture for harness and reporting checks."
+    }
+  ]
+}

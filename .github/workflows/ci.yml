@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: Python service, storage, and validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: "ReClass Model"
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      RECLASS_MAINTENANCE_DB: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package, service, DB, and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r api/requirements.txt
+          pip install -e ".[api,db,dev]"
+
+      - name: Lint Job 3 surfaces
+        run: ruff check api storage ops monitoring db reporting
+
+      - name: Type check gated packages
+        run: mypy
+
+      - name: Data-hygiene guard
+        working-directory: ${{ github.workspace }}
+        run: |
+          git ls-files -z -- "ReClass Model" \
+            | xargs -0 python "ReClass Model/ops/repo_guard.py" --repo-root .
+
+      - name: Unit and integration tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Migration apply and restore rehearsal
+        run: python -m unittest tests.test_db_migrations -v
+
+      - name: Validation gates
+        run: |
+          python validation/harness.py synthetic_v1
+          python validation/harness.py clingen_real_v1
+
+      - name: Generate validation report artifacts
+        run: |
+          mkdir -p validation/reports/ci
+          python cli.py report analytical-validation --json > validation/reports/ci/analytical_validation.json
+          python cli.py report failures synthetic_v1 --json > validation/reports/ci/failures_synthetic_v1.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-reports
+          path: ReClass Model/validation/reports/ci/
+          if-no-files-found: error
+
+  deploy:
+    name: Docker and compose checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: "ReClass Model"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker image builds
+        run: docker build -f deploy/Dockerfile -t reclass-api:ci .
+
+      - name: Compose file is valid
+        run: docker compose -f deploy/docker-compose.yml config
+
+  frontend:
+    name: Frontend headless checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: "ReClass Model"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run dependency-free browser harness
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium-browser || command -v chromium || true)"
+          if [ -z "$CHROME" ]; then
+            echo "No Chrome/Chromium binary found for frontend headless checks" >&2
+            exit 1
+          fi
+          "$CHROME" --headless=new --disable-gpu --no-sandbox \
+            --virtual-time-budget=8000 --dump-dom \
+            "file://$PWD/frontend/tests/test.html" | tee frontend-test-dom.html
+          grep "RECLASS-TEST-RESULT pass=true" frontend-test-dom.html
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-test-dom
+          path: ReClass Model/frontend-test-dom.html
+          if-no-files-found: ignore
+
+  fhir-profile:
+    name: Optional FHIR profile validation
+    runs-on: ubuntu-latest
+    if: ${{ vars.FHIR_PROFILE_VALIDATION == 'true' }}
+    defaults:
+      run:
+        working-directory: "ReClass Model"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Generate sample FHIR bundle
+        run: |
+          python - <<'PY' > fhir-sample.json
+          from engine.scoring import EvidenceEvent, classify
+          from reporting.fhir import genomics_report_bundle, to_json
+
+          clf = classify([
+              EvidenceEvent(
+                  source="curated",
+                  acmg_criterion="PVS1",
+                  evidence_direction="pathogenic",
+                  applied_strength="very_strong",
+              )
+          ])
+          print(to_json(genomics_report_bundle(
+              clf,
+              variant_key="GRCh38-1-100-A-G",
+              report_id="ci-fhir-profile",
+              signer="CI Validator",
+              issued="2026-06-17T00:00:00+00:00",
+          )))
+          PY
+
+      - name: Run configured FHIR validator
+        env:
+          FHIR_VALIDATOR_COMMAND: ${{ secrets.FHIR_VALIDATOR_COMMAND }}
+        run: |
+          if [ -z "${FHIR_VALIDATOR_COMMAND:-}" ]; then
+            echo "FHIR_PROFILE_VALIDATION=true but FHIR_VALIDATOR_COMMAND is unset; generated sample only."
+            exit 0
+          fi
+          $FHIR_VALIDATOR_COMMAND fhir-sample.json

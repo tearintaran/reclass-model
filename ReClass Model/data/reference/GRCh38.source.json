@@ -1,0 +1,18 @@
+{
+  "build": "GRCh38",
+  "pinned_source": "Ensembl GRCh38 primary assembly",
+  "version": "Ensembl release-110",
+  "url": "https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+  "contig_naming": "bare (1, 2, ..., X, Y, MT) — matches the ClinVar VCF and REVEL index convention used across this project",
+  "install": "bash data/reference/install_grch38.sh   (from the 'ReClass Model/' directory)",
+  "default_install_path": "data/reference/GRCh38.fa",
+  "checksum_policy": "The whole-genome FASTA is a local-only, gitignored cache. install_grch38.sh records the installed file's SHA-256 + provenance into GRCh38.fa.meta.json via `engine.reference_cache --record`. Pin that digest via RECLASS_GRCH38_SHA256 (or --sha256) to make loads tamper-evident.",
+  "alternate_sources": [
+    {
+      "name": "GRCh38 no-alt analysis set (GCA_000001405.15_GRCh38_no_alt_analysis_set)",
+      "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz",
+      "note": "chr-prefixed contig names; normalize_chrom() strips the leading 'chr' on lookup."
+    }
+  ],
+  "note": "Reference-backed left-alignment only reads short windows around each locus, so any faithful GRCh38 primary assembly yields identical normalization. The committed sha256 is intentionally left to install time (see checksum_policy) so a site records the digest of the genome it actually installed."
+}

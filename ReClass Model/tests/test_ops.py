@@ -63,6 +63,37 @@ class TestSchedulerPure(unittest.TestCase):
         self.assertTrue(opss.config_version_changed("0.9", "1.0.0"))
         self.assertFalse(opss.config_version_changed("1.0.0", "1.0.0"))
 
+    def test_source_and_conflict_policy_changes_enqueue_with_manifest(self):
+        snapshot_changes = opss.source_snapshot_changes(
+            {"clinvar": "sha-old"},
+            {"clinvar": "sha-new", "clingen": "sha-1"},
+        )
+        self.assertEqual(snapshot_changes["clinvar"], ("sha-old", "sha-new"))
+        self.assertEqual(snapshot_changes["clingen"], (None, "sha-1"))
+        self.assertTrue(opss.conflict_policy_changed("policy-v1", "policy-v2"))
+
+        queue, manifest = opss.enqueue_affected_variants(
+            ["variant-a", "variant-b"],
+            trigger="source_snapshot",
+            cause="ClinVar snapshot sha-old -> sha-new",
+            run_id="run-123",
+            tenant_id="tenant-1",
+            priority=7,
+        )
+        self.assertEqual(len(queue), 2)
+        self.assertEqual(manifest["run_id"], "run-123")
+        self.assertEqual(manifest["trigger_cause"], "ClinVar snapshot sha-old -> sha-new")
+        self.assertEqual([i["variant_id"] for i in manifest["items"]], ["variant-a", "variant-b"])
+        self.assertTrue(all(i["trigger"] == "source_snapshot" for i in manifest["items"]))
+
+        _, policy_manifest = opss.enqueue_affected_variants(
+            ["variant-a"],
+            trigger="conflict_policy",
+            cause="BA1 curated-pathogenic exception policy changed",
+            run_id="run-456",
+        )
+        self.assertEqual(policy_manifest["items"][0]["trigger"], "conflict_policy")
+
     def test_execute_run_buckets_outcomes(self):
         items = ["v_unchanged", "v_same", "v_crossed"]
         results = {
@@ -163,6 +194,7 @@ class TestQueuePure(unittest.TestCase):
             {"variant_id": "a", "trigger": "provider_version", "reason": "gnomAD 4.1",
              "priority": 3},
             {"variant_id": "b"},
+            {"variant_id": "c", "trigger": "conflict_policy"},
         ]}
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
             json.dump(data, fh)
@@ -171,9 +203,10 @@ class TestQueuePure(unittest.TestCase):
             items = opsq.load_manifest(path)
         finally:
             os.unlink(path)
-        self.assertEqual(len(items), 2)
+        self.assertEqual(len(items), 3)
         self.assertEqual(items[0].trigger, "provider_version")
         self.assertEqual(items[1].trigger, "evidence")  # default
+        self.assertEqual(items[2].trigger, "conflict_policy")
 
     def test_manifest_rejects_unknown_trigger(self):
         with self.assertRaises(ValueError):
@@ -259,6 +292,24 @@ class TestRepoGuardPure(unittest.TestCase):
                 fh.write(b"\0" * 2048)
             flagged = dict(guard.check_paths(["blob.dat"], repo_root=root, size_limit=1024))
             self.assertEqual(flagged["blob.dat"], guard.OVERSIZED)
+
+    def test_hook_script_checks_staged_paths_from_repo_root(self):
+        script = guard.hook_script()
+        self.assertIn("repo_guard.py", script)
+        self.assertIn("--staged --repo-root", script)
+        self.assertIn('git rev-parse --show-toplevel', script)
+
+    def test_install_pre_commit_hook(self):
+        with tempfile.TemporaryDirectory() as root:
+            hooks = os.path.join(root, ".git", "hooks")
+            os.makedirs(hooks)
+            path = guard.install_pre_commit_hook(root)
+            self.assertEqual(path, os.path.join(root, ".git", "hooks", "pre-commit"))
+            self.assertTrue(os.access(path, os.X_OK))
+            with open(path, encoding="utf-8") as fh:
+                script = fh.read()
+            self.assertIn("ReClass Model/ops/repo_guard.py", script)
+            self.assertIn("--staged --repo-root", script)
 
 
 # --------------------------------------------------------------------------- #

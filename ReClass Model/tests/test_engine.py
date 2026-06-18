@@ -6,6 +6,7 @@ Run from the project root (the `ReClass Model/` folder):
 """
 
 import os
+import json
 import sys
 import unittest
 
@@ -15,7 +16,6 @@ from engine import config as C
 from engine.config_registry import (
     BASE_CONFIG,
     BASE_CONFIG_VERSION,
-    EngineConfig,
     get_config,
 )
 from engine.scoring import (
@@ -338,7 +338,22 @@ class TestConfigRegistry(unittest.TestCase):
         fp = C.config_fingerprint()
         self.assertEqual(fp["version"], C.ENGINE_VERSION)
         self.assertIn("pku_vcep_ba1", fp["override_ids"])
+        self.assertIn("founder_variant_frequency_exception_template", fp["override_ids"])
         self.assertEqual(fp["config_hash"], C.CONFIG_HASH)
+
+    def test_config_carries_review_status_annotation(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "engine", "configs", "base_v1.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(
+            data["clinical_review"]["review_status"],
+            "governance_reviewed_pending_credentialed_signoff",
+        )
+        self.assertEqual(
+            data["clinical_review"]["clinical_release"],
+            "blocked_until_credentialed_human_signoff",
+        )
 
     def test_resolve_applies_vcep_override(self):
         r = BASE_CONFIG.resolve(vcep="Phenylketonuria VCEP")
@@ -366,10 +381,19 @@ class TestConfigRegistry(unittest.TestCase):
             ["hearing_loss_gjb2_35delg"],
         )
 
+    def test_hearing_loss_override_matches_current_cspec_values(self):
+        r = BASE_CONFIG.resolve(gene="GJB2", disease="Nonsyndromic Hearing Loss")
+        self.assertIn("hearing_loss_gjb2_35delg", r.applied_override_ids)
+        self.assertEqual(r.config.ba1_af, 0.005)
+        self.assertEqual(r.config.bs1_af, 0.003)
+
     def test_founder_variant_override_by_key(self):
-        ovs = BASE_CONFIG.matching_overrides(variant_key="GRCh38-13-32340301-A-G")
+        ovs = BASE_CONFIG.matching_overrides(
+            variant_key="REPLACE_WITH_CURATED_FOUNDER_VARIANT_KEY"
+        )
         self.assertEqual([o["id"] for o in ovs],
-                         ["founder_variant_frequency_exception_example"])
+                         ["founder_variant_frequency_exception_template"])
+        self.assertEqual(ovs[0]["set"], {}, "founder exception is a non-scoring template")
 
     def test_perturb_changes_version_and_hash(self):
         p = BASE_CONFIG.perturb(pm2_af=BASE_CONFIG.pm2_af / 10.0, version_suffix="-x")

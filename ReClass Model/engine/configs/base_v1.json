@@ -6,7 +6,20 @@
     "points_model": "Tavtigian et al. 2020 (ClinGen SVI Bayesian points)",
     "revel_bins": "Pejaver et al. 2022 (ClinGen SVI calibrated REVEL thresholds)",
     "frequency": "gnomAD popmax/joint.faf95 practice for ACMG BA1/BS1/PM2",
-    "status": "Reconstructed defaults; confirm against the current ClinGen SVI calibration before clinical use."
+    "status": "Governance-reviewed 2026-06-16 for source/spec drift. Not clinically approved until credentialed human sign-off is recorded in docs/clinical_review.md."
+  },
+  "clinical_review": {
+    "review_status": "governance_reviewed_pending_credentialed_signoff",
+    "review_date": "2026-06-16",
+    "reviewer": "Codex automated governance pass",
+    "scope": [
+      "base ACMG/AMP Bayesian point defaults",
+      "REVEL PP3/BP4 bins",
+      "BA1/BS1/PM2 allele-frequency defaults",
+      "gene/disease/VCEP override annotations"
+    ],
+    "clinical_release": "blocked_until_credentialed_human_signoff",
+    "record": "docs/clinical_review.md"
   },
   "strength_points": {
     "supporting": 1,
@@ -43,21 +56,24 @@
       "match": {"vcep": "Phenylketonuria VCEP"},
       "set": {"ba1_af": 0.015, "bs1_af": 0.002},
       "rationale": "ClinGen PAH (Phenylketonuria) VCEP applies gene-specific BA1/BS1 frequency thresholds well below the 5%/1% ACMG defaults because common pathogenic PAH alleles reach appreciable population frequency.",
-      "source": "ClinGen PAH VCEP specifications (illustrative default; confirm against the current VCEP rule set)."
+      "source": "ClinGen Phenylketonuria Expert Panel Specifications to the ACMG/AMP Variant Interpretation Guidelines for PAH Version 2.0.0, released 2024-07-16; CSpec https://erepo.clinicalgenome.org/cspec/ui/svi/doc/135637578; accessed 2026-06-16.",
+      "review_status": "confirmed_current_cspec_2026-06-16"
     },
     {
       "id": "hearing_loss_gjb2_35delg",
       "match": {"gene": "GJB2", "disease": "Nonsyndromic Hearing Loss"},
-      "set": {"bs1_af": 0.005},
-      "rationale": "The ClinGen Hearing Loss VCEP raises the BS1 frequency threshold for GJB2 to accommodate the high carrier frequency of the GJB2 c.35delG founder allele.",
-      "source": "ClinGen Hearing Loss VCEP specifications (illustrative default)."
+      "set": {"ba1_af": 0.005, "bs1_af": 0.003},
+      "rationale": "ClinGen Hearing Loss VCEP v2 uses autosomal-recessive hearing-loss thresholds of BA1 >=0.005 and BS1_Strong >=0.003 for the scoped hearing-loss genes, including GJB2. This replaces the earlier illustrative BS1-only 0.005 override.",
+      "source": "ClinGen Hearing Loss Expert Panel Specifications to the ACMG/AMP Variant Interpretation Guidelines for CDH23, COCH, GJB2, KCNQ4, MYO6, MYO7A, SLC26A4, TECTA and USH2A Version 2.0.0, released 2022-03-30; CSpec https://cspec.genome.network/cspec/ui/svi/doc/GN005; accessed 2026-06-16.",
+      "review_status": "corrected_to_current_cspec_2026-06-16"
     },
     {
-      "id": "founder_variant_frequency_exception_example",
-      "match": {"variant_key": "GRCh38-13-32340301-A-G"},
-      "set": {"bs1_af": 0.02, "ba1_af": 0.10},
-      "rationale": "Founder-variant frequency exception: a known founder pathogenic allele may exceed the default BS1/BA1 thresholds within its founder population without being benign. Represented here as a per-variant override so the exception is reviewable, not hard-coded.",
-      "source": "Illustrative founder-variant exception; replace with curated per-variant exceptions."
+      "id": "founder_variant_frequency_exception_template",
+      "match": {"variant_key": "REPLACE_WITH_CURATED_FOUNDER_VARIANT_KEY"},
+      "set": {},
+      "rationale": "Template only. A known founder pathogenic allele may require a per-variant frequency exception, but no active scoring threshold is changed here until a credentialed reviewer records the exact variant, founder population, evidence basis, and approval.",
+      "source": "Local conflict-handling policy in docs/conflict_handling.md; not a ClinGen VCEP threshold.",
+      "review_status": "template_only_not_clinically_active"
     }
   ]
 }

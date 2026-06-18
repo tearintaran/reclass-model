@@ -15,8 +15,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from engine.reference import InMemoryReference
 from evidence.clingen import ClinGenEvidenceProvider, ClinGenIndex
-from evidence.enrich_clinvar import BENCHMARK_NAME, build_enriched, enrich_case
+from evidence.enrich_clinvar import (
+    BENCHMARK_NAME,
+    ROUTE_COLUMNS,
+    build_enriched,
+    enrich_case,
+)
 
 
 def _cg_case(case_id, clinvar_id, expected, criteria):
@@ -210,6 +216,88 @@ class TestMatchTypeAccounting(unittest.TestCase):
         self.assertEqual(audit["reference_available"], False)
         # CV-200/CV-300/CV-999 all carry SNV loci.
         self.assertEqual(audit["snv"], 3)
+
+
+# --------------------------------------------------------------------------- #
+# job1: deterministic per-route accounting + new hgvs_g tier + ambiguity       #
+# --------------------------------------------------------------------------- #
+REF_CHR1 = InMemoryReference({"1": "GAAAAT"})
+
+
+def _cg_case_hgvs(case_id, expected, criteria, grch38_hgvs, clinvar_id="-"):
+    case = _cg_case(case_id, clinvar_id, expected, criteria)
+    case["provenance"]["grch38_hgvs"] = grch38_hgvs
+    return case
+
+
+def _cv_indel(case_id, variation_id, expected, pos, ref, alt):
+    case = _cv_case(case_id, variation_id, expected, {"criteria": []})
+    case["locus"] = {"chrom": "1", "pos": pos, "ref": ref, "alt": alt}
+    return case
+
+
+class TestRouteAccounting(unittest.TestCase):
+    def test_route_counts_partition_sums_to_total(self):
+        # variation_id (CV-200, CV-300) + unmatched (CV-999) -> exact partition.
+        s = build_enriched(CLINVAR, _provider())["enrichment_summary"]
+        rc = s["route_counts"]
+        self.assertEqual(set(rc), set(ROUTE_COLUMNS))
+        self.assertEqual(sum(rc.values()), s["total_cases"])
+        self.assertEqual(rc["variation_id"], 2)
+        self.assertEqual(rc["unmatched"], 1)
+
+    def test_unbuildable_routes_are_constant_zero(self):
+        # Tiers with no local key on the ClinVar side are reported, not dropped.
+        rc = build_enriched(CLINVAR, _provider())["enrichment_summary"]["route_counts"]
+        self.assertEqual(rc["hgvs_c_mane"], 0)
+        self.assertEqual(rc["hgvs_p_gene"], 0)
+        self.assertEqual(rc["source_synonym"], 0)
+
+    def test_hgvs_g_route_counted_end_to_end(self):
+        # ClinGen record with only a genomic deletion HGVS; a ClinVar indel at the
+        # same coordinates matches via the hgvs_g tier and gains the criteria.
+        cg = _cg_case_hgvs("CG-G", "Pathogenic",
+                           [_crit("PVS1", "pathogenic", "very_strong")],
+                           "NC_000001.11:g.2del")
+        prov = ClinGenEvidenceProvider(
+            ClinGenIndex.from_cases([cg], reference=REF_CHR1), reference=REF_CHR1)
+        clinvar = {"benchmark": "x", "engine_version": "1.0.0",
+                   "cases": [_cv_indel("CV-IND", "999", "Pathogenic", 2, "AA", "A")]}
+        enriched = build_enriched(clinvar, prov)
+        s = enriched["enrichment_summary"]
+        self.assertEqual(s["route_counts"]["hgvs_g"], 1)
+        self.assertEqual(s["match_by_hgvs_g"], 1)
+        self.assertEqual(s["matched_total"], 1)
+        case = enriched["cases"][0]
+        self.assertEqual(case["enrichment"]["route"], "hgvs_g")
+        self.assertEqual(case["enrichment"]["criteria_added"], 1)
+        self.assertEqual(case["signals"]["criteria"][0]["criterion"], "PVS1")
+
+    def test_ambiguous_fallback_imports_nothing_and_is_counted(self):
+        # Two ClinGen records at one coordinate disagree on criteria -> ambiguous:
+        # no criteria imported, counted under `ambiguous`, not `matched`.
+        cg_a = _cg_case("CG-A", "100", "Pathogenic", [_crit("PVS1", "pathogenic", "very_strong")])
+        cg_b = _cg_case("CG-B", "100", "Benign", [_crit("BA1", "benign", "stand_alone")])
+        cg_a["locus"] = {"chrom": "1", "pos": 100, "ref": "A", "alt": "G"}
+        cg_b["locus"] = {"chrom": "1", "pos": 100, "ref": "A", "alt": "G"}
+        # clinvar_id 100 != the ClinVar case's 999, so this is a FALLBACK (coordinate)
+        # match, where the ambiguity rule applies.
+        prov = ClinGenEvidenceProvider(ClinGenIndex.from_cases([cg_a, cg_b]))
+        clinvar = {"benchmark": "x", "engine_version": "1.0.0",
+                   "cases": [_cv_case("CV-AMB", "999", "Pathogenic", {"criteria": []})]}
+        clinvar["cases"][0]["locus"] = {"chrom": "1", "pos": 100, "ref": "A", "alt": "G",
+                                        "snv": True}
+        enriched = build_enriched(clinvar, prov)
+        s = enriched["enrichment_summary"]
+        self.assertEqual(s["route_counts"]["ambiguous"], 1)
+        self.assertEqual(s["ambiguous"], 1)
+        self.assertEqual(s["matched_total"], 0)
+        case = enriched["cases"][0]
+        self.assertEqual(case["enrichment"]["route"], "ambiguous")
+        self.assertTrue(case["enrichment"]["ambiguous"])
+        self.assertEqual(case["enrichment"]["criteria_added"], 0)
+        self.assertEqual(case["signals"]["criteria"], [])  # missing evidence stays unknown
+        self.assertEqual(case["enrichment"]["candidate_ids"], ["CG-A", "CG-B"])
 
 
 if __name__ == "__main__":

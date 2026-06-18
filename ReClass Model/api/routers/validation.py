@@ -16,6 +16,8 @@ from pydantic import BaseModel
 
 from engine import config as C
 
+from ..auth import UserContext
+from ..authz import require_permission
 from ..deps import get_app_settings
 from ..settings import Settings
 
@@ -30,6 +32,7 @@ class ValidationRunRequest(BaseModel):
 def run_validation(
     req: ValidationRunRequest,
     settings: Settings = Depends(get_app_settings),
+    user: UserContext = Depends(require_permission("validation:run")),
 ) -> Dict[str, Any]:
     if not settings.is_development:
         raise HTTPException(

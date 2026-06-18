@@ -14,7 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.scoring import EvidenceEvent, classify
 from evidence.model import (
     SCHEMA_VERSION,
+    CohortCounts,
     EvidenceBundle,
+    TranscriptIdentity,
     event_from_dict,
     event_to_dict,
 )
@@ -123,6 +125,49 @@ class TestEvidenceBundle(unittest.TestCase):
     def test_none_match_round_trips(self):
         bundle = EvidenceBundle(match=None)
         self.assertIsNone(EvidenceBundle.from_json(bundle.to_json()).match)
+
+
+class TestTranscriptAndCohortFields(unittest.TestCase):
+    """Additive transcript identity + PS4 cohort-count fields (job1 tasks 4-5)."""
+
+    def test_defaults_are_none_and_back_compatible(self):
+        # A bundle written without the new fields deserializes unchanged.
+        d = EvidenceBundle(events=_events()).to_dict()
+        self.assertIsNone(d["transcript"])
+        self.assertIsNone(d["cohort_counts"])
+        d.pop("transcript")
+        d.pop("cohort_counts")  # simulate an older serialized dict (no new keys)
+        restored = EvidenceBundle.from_dict(d)
+        self.assertIsNone(restored.transcript)
+        self.assertIsNone(restored.cohort_counts)
+
+    def test_transcript_round_trips(self):
+        bundle = EvidenceBundle(
+            transcript=TranscriptIdentity(mane_select="NM_1.3", gene="G", hgvs_c="c.1A>G"))
+        restored = EvidenceBundle.from_json(bundle.to_json())
+        self.assertEqual(restored.transcript.mane_select, "NM_1.3")
+        self.assertTrue(restored.transcript.is_mane_select)
+        self.assertEqual(restored.transcript.hgvs_c, "c.1A>G")
+
+    def test_cohort_counts_round_trips_with_denominator(self):
+        bundle = EvidenceBundle(cohort_counts=CohortCounts(
+            case_count=40, case_total=100, control_count=5, control_total=100,
+            odds_ratio=8.0, ci_low=3.0))
+        d = bundle.to_dict()
+        self.assertEqual(d["cohort_counts"]["denominator"], 200)
+        restored = EvidenceBundle.from_json(bundle.to_json())
+        self.assertEqual(restored.cohort_counts.case_count, 40)
+        self.assertEqual(restored.cohort_counts.denominator, 200)
+        self.assertAlmostEqual(restored.cohort_counts.odds_ratio, 8.0)
+
+    def test_new_fields_do_not_change_reconstruction_hash(self):
+        # transcript / cohort_counts are provenance, outside the engine event hash.
+        plain = EvidenceBundle(events=_events())
+        annotated = EvidenceBundle(
+            events=_events(),
+            transcript=TranscriptIdentity(mane_select="NM_1.3"),
+            cohort_counts=CohortCounts(case_count=1, case_total=2))
+        self.assertEqual(plain.reconstruction_hash(), annotated.reconstruction_hash())
 
 
 class TestProviderInterface(unittest.TestCase):

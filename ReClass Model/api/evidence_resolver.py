@@ -39,6 +39,19 @@ class EvidenceResolver:
     def provider_names(self) -> List[str]:
         return sorted(self._providers)
 
+    @property
+    def provider_catalog(self) -> List[Dict[str, str]]:
+        """The configured providers as ``{name, version}``, sorted by registry name.
+
+        Exposed (via ``GET /evidence/providers``) so the reviewer UI can list the
+        *configured* providers and their source versions without first running a
+        resolve. ``name`` is the registry key passed to ``resolve(providers=...)``.
+        """
+        return [
+            {"name": name, "version": str(getattr(self._providers[name], "version", ""))}
+            for name in sorted(self._providers)
+        ]
+
     # -- resolution --------------------------------------------------------- #
     def resolve(
         self,
@@ -51,7 +64,8 @@ class EvidenceResolver:
 
         Returns ``{"bundle": EvidenceBundle, "per_provider": {name: EvidenceBundle}}``
         where ``bundle`` is the merged view (all events concatenated, provider
-        versions/source records/warnings unioned) and ``per_provider`` keeps each
+        versions/source records/warnings unioned, plus the first transcript identity
+        and PS4 cohort counts any provider supplied) and ``per_provider`` keeps each
         provider's individual bundle for auditing. Unknown provider names are
         reported as a deterministic ``unknown_provider:<name>`` warning rather
         than raising, so a typo never takes the endpoint down.
@@ -85,6 +99,17 @@ class EvidenceResolver:
                 merged.warnings.append(f"{name}:{w}")
             if merged.variant_key is None:
                 merged.variant_key = bundle.variant_key
+            # Transcript identity (job1 task 4) and PS4 cohort counts (task 5) are
+            # single-valued provenance a provider may attach to its bundle. Carry the
+            # first non-None of each into the merged view -- deterministic because
+            # providers are visited in sorted `selected` order -- so identity/cohort
+            # context survives the fan-out instead of being silently dropped (each is
+            # taken independently: transcript may come from one provider, cohort
+            # counts from another).
+            if merged.transcript is None and bundle.transcript is not None:
+                merged.transcript = bundle.transcript
+            if merged.cohort_counts is None and bundle.cohort_counts is not None:
+                merged.cohort_counts = bundle.cohort_counts
 
         # Per-provider match blocks are kept in `match` under each provider name so
         # the merged bundle still answers "how did each source resolve identity?".

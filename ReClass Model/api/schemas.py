@@ -167,4 +167,23 @@ class EvidenceBundleResponse(BaseModel):
     source_records: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     match: Optional[Dict[str, Any]] = None
+    #: MANE Select / RefSeq transcript identity (job1 task 4) when a provider
+    #: supplied it; ``None`` when no transcript context was resolved.
+    transcript: Optional[Dict[str, Any]] = None
+    #: PS4 denominator + case/control cohort counts (job1 task 5) when a provider
+    #: supplied them; ``None`` when no case-control evidence was resolved.
+    cohort_counts: Optional[Dict[str, Any]] = None
     per_provider: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+
+class ProviderInfo(BaseModel):
+    """One configured evidence provider: its registry name and source version."""
+
+    name: str
+    version: str = ""
+
+
+class ProvidersResponse(BaseModel):
+    """The configured evidence providers, for the reviewer UI provider panel."""
+
+    providers: List[ProviderInfo] = Field(default_factory=list)

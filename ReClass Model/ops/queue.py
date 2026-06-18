@@ -20,12 +20,18 @@ from __future__ import annotations
 import heapq
 import itertools
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 # Triggers that may enqueue work (kept in sync with ops.scheduler.TRIGGERS).
-_VALID_TRIGGERS = ("evidence", "provider_version", "config_version")
+_VALID_TRIGGERS = (
+    "evidence",
+    "source_snapshot",
+    "provider_version",
+    "config_version",
+    "conflict_policy",
+)
 
 
 @dataclass
@@ -126,6 +132,24 @@ def queue_from_manifest(path: Union[str, Path]) -> InMemoryQueue:
     for item in load_manifest(path):
         q.enqueue(item)
     return q
+
+
+def build_run_manifest(
+    items: List[QueueItem],
+    *,
+    run_id: str,
+    trigger_cause: str,
+) -> Dict[str, Any]:
+    """Build an auditable run manifest for a reanalysis enqueue wave."""
+    if not run_id:
+        raise ValueError("run_id is required")
+    if not trigger_cause:
+        raise ValueError("trigger_cause is required")
+    return {
+        "run_id": run_id,
+        "trigger_cause": trigger_cause,
+        "items": [item.to_dict() for item in items],
+    }
 
 
 # --------------------------------------------------------------------------- #

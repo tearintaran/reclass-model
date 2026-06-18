@@ -260,7 +260,7 @@ def main(argv: list | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     written: list = []
     if argv:
-        path = os.path.join(REPORTS_DIR, f"validation_report"
+        path = os.path.join(REPORTS_DIR, "validation_report"
                             + ("" if argv[0] == "synthetic_v1" else "_" + argv[0]) + ".json")
         if not os.path.exists(path):
             raise SystemExit(f"No report at {path}. Run validation/harness.py {argv[0]} first.")

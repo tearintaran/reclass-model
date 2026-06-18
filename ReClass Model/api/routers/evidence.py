@@ -11,16 +11,40 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from ..auth import UserContext
+from ..authz import require_permission
 from ..deps import get_resolver
 from ..evidence_resolver import EvidenceResolver
-from ..schemas import EvidenceBundleResponse, ResolveRequest
+from ..schemas import (
+    EvidenceBundleResponse,
+    ProviderInfo,
+    ProvidersResponse,
+    ResolveRequest,
+)
 
 router = APIRouter(tags=["evidence"])
+
+
+@router.get("/evidence/providers", response_model=ProvidersResponse)
+def list_providers(
+    user: UserContext = Depends(require_permission("evidence:resolve")),
+    resolver: EvidenceResolver = Depends(get_resolver),
+) -> ProvidersResponse:
+    """List the *configured* evidence providers and their source versions.
+
+    De-identified (no patient data, no variant), like resolve. The reviewer UI
+    uses this to populate its provider panel without first running a resolve, so
+    the available provider set is never hardcoded on the client.
+    """
+    return ProvidersResponse(
+        providers=[ProviderInfo(**p) for p in resolver.provider_catalog],
+    )
 
 
 @router.post("/evidence/resolve", response_model=EvidenceBundleResponse)
 def resolve_evidence(
     req: ResolveRequest,
+    user: UserContext = Depends(require_permission("evidence:resolve")),
     resolver: EvidenceResolver = Depends(get_resolver),
 ) -> EvidenceBundleResponse:
     result = resolver.resolve(
@@ -37,5 +61,7 @@ def resolve_evidence(
         source_records=bundle["source_records"],
         warnings=bundle["warnings"],
         match=bundle["match"],
+        transcript=bundle["transcript"],
+        cohort_counts=bundle["cohort_counts"],
         per_provider=per_provider,
     )

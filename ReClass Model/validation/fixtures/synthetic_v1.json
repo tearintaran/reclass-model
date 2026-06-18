@@ -2,6 +2,11 @@
   "benchmark": "synthetic_v1",
   "engine_version": "1.0.0",
   "note": "Synthetic, rule-derived benchmark for harness validation only. Not a clinical concordance figure.",
+  "field_semantics": {
+    "population": "True genetic-ancestry / population-stratification group (mirrors `ancestry` here; these are real ancestries).",
+    "vcep_group": "ClinGen VCEP / expert-panel grouping (None for synthetic).",
+    "ancestry": "Back-compatible alias retained for the existing harness."
+  },
   "cases": [
     {
       "id": "P-01",
@@ -22,7 +27,9 @@
             "strength": "strong"
           }
         ]
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "P-02",
@@ -47,7 +54,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "African",
+      "vcep_group": null
     },
     {
       "id": "P-03",
@@ -72,7 +81,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "P-04",
@@ -97,7 +108,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "Latino",
+      "vcep_group": null
     },
     {
       "id": "LP-01",
@@ -113,7 +126,9 @@
             "strength": "very_strong"
           }
         ]
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "LP-02",
@@ -138,7 +153,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "East Asian",
+      "vcep_group": null
     },
     {
       "id": "LP-03",
@@ -158,7 +175,9 @@
             "strength": "moderate"
           }
         ]
-      }
+      },
+      "population": "Latino",
+      "vcep_group": null
     },
     {
       "id": "LP-04",
@@ -178,7 +197,9 @@
             "strength": "moderate"
           }
         ]
-      }
+      },
+      "population": "South Asian",
+      "vcep_group": null
     },
     {
       "id": "LP-05",
@@ -198,7 +219,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "African",
+      "vcep_group": null
     },
     {
       "id": "LP-06",
@@ -218,7 +241,9 @@
             "strength": "moderate"
           }
         ]
-      }
+      },
+      "population": "East Asian",
+      "vcep_group": null
     },
     {
       "id": "B-01",
@@ -227,7 +252,9 @@
       "expected": "Benign",
       "signals": {
         "gnomad_af": 0.08
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "B-02",
@@ -236,7 +263,9 @@
       "expected": "Benign",
       "signals": {
         "gnomad_af": 0.06
-      }
+      },
+      "population": "South Asian",
+      "vcep_group": null
     },
     {
       "id": "B-03",
@@ -256,7 +285,9 @@
             "strength": "strong"
           }
         ]
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "B-04",
@@ -276,7 +307,9 @@
             "strength": "strong"
           }
         ]
-      }
+      },
+      "population": "East Asian",
+      "vcep_group": null
     },
     {
       "id": "B-05",
@@ -296,7 +329,9 @@
             "strength": "strong"
           }
         ]
-      }
+      },
+      "population": "South Asian",
+      "vcep_group": null
     },
     {
       "id": "LB-01",
@@ -316,7 +351,9 @@
             "strength": "moderate"
           }
         ]
-      }
+      },
+      "population": "South Asian",
+      "vcep_group": null
     },
     {
       "id": "LB-02",
@@ -336,7 +373,9 @@
             "strength": "moderate"
           }
         ]
-      }
+      },
+      "population": "Latino",
+      "vcep_group": null
     },
     {
       "id": "LB-03",
@@ -356,7 +395,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "LB-04",
@@ -376,7 +417,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "African",
+      "vcep_group": null
     },
     {
       "id": "VUS-01",
@@ -385,7 +428,9 @@
       "expected": "VUS",
       "signals": {
         "criteria": []
-      }
+      },
+      "population": "European",
+      "vcep_group": null
     },
     {
       "id": "VUS-02",
@@ -400,7 +445,9 @@
             "strength": "moderate"
           }
         ]
-      }
+      },
+      "population": "African",
+      "vcep_group": null
     },
     {
       "id": "VUS-03",
@@ -420,7 +467,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "East Asian",
+      "vcep_group": null
     },
     {
       "id": "VUS-04",
@@ -429,7 +478,9 @@
       "expected": "VUS",
       "signals": {
         "criteria": []
-      }
+      },
+      "population": "Latino",
+      "vcep_group": null
     },
     {
       "id": "NM-01",
@@ -449,7 +500,9 @@
             "strength": "supporting"
           }
         ]
-      }
+      },
+      "population": "African",
+      "vcep_group": null
     },
     {
       "id": "NM-02",
@@ -464,7 +517,106 @@
             "strength": "strong"
           }
         ]
-      }
+      },
+      "population": "African",
+      "vcep_group": null
+    },
+    {
+      "id": "NC-01",
+      "gene": "REGUL1",
+      "ancestry": "European",
+      "expected": "Likely Benign",
+      "signals": {
+        "gnomad_af": 0.02,
+        "noncoding": "noncoding_no_predicted_effect"
+      },
+      "population": "European",
+      "vcep_group": null,
+      "note": "A2 non-coding: BP7 (no predicted effect, -1) + BS1 (gnomAD 2%, -4) = -5 -> Likely Benign."
+    },
+    {
+      "id": "CI-01",
+      "gene": "DMD",
+      "ancestry": "Latino",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "gnomad_af": 1e-06,
+        "complex_indel": {"frame": "frameshift", "lof_mechanism": true}
+      },
+      "population": "Latino",
+      "vcep_group": null,
+      "note": "A2 complex-indel: PVS1 (frameshift in a LoF gene, +8) + PM2 (+1) = +9 -> Likely Pathogenic."
+    },
+    {
+      "id": "MT-01",
+      "gene": "MT-TL1",
+      "ancestry": "African",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "mito": {"heteroplasmy": 0.85, "het_segregates": true},
+        "criteria": [
+          {"criterion": "PS1", "direction": "pathogenic", "strength": "strong"},
+          {"criterion": "PM2", "direction": "pathogenic", "strength": "supporting"}
+        ]
+      },
+      "population": "African",
+      "vcep_group": null,
+      "note": "A2 mitochondrial: PS4 (segregating heteroplasmy, +2) + PS1 (+4) + PM2 (+1) = +7 -> Likely Pathogenic."
+    },
+    {
+      "id": "RE-01",
+      "gene": "HTT",
+      "ancestry": "European",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "repeat": {"locus": "HTT", "repeat_count": 42}
+      },
+      "population": "European",
+      "vcep_group": null,
+      "note": "A2 repeat-expansion: HD CAG 42 (>= 40 full penetrance) -> PVS1 very_strong (+8) -> Likely Pathogenic."
+    },
+    {
+      "id": "SV-01",
+      "gene": "NF1",
+      "ancestry": "East Asian",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "gnomad_af": 1e-06,
+        "sv": {"category": "del_haploinsufficient_gene", "gene": "NF1"}
+      },
+      "population": "East Asian",
+      "vcep_group": null,
+      "note": "A2 structural-variant: deletion of a dosage-sensitive gene -> PVS1 (+8) + PM2 (+1) = +9 -> Likely Pathogenic."
+    },
+    {
+      "id": "AM-01",
+      "gene": "BRCA2",
+      "ancestry": "European",
+      "expected": "Likely Pathogenic",
+      "signals": {
+        "revel": 0.95,
+        "alphamissense": 0.96,
+        "criteria": [
+          {"criterion": "PM1", "direction": "pathogenic", "strength": "moderate"},
+          {"criterion": "PM2", "direction": "pathogenic", "strength": "supporting"}
+        ]
+      },
+      "population": "European",
+      "vcep_group": null,
+      "note": "A3 multi-predictor consensus: REVEL+AlphaMissense agree -> ONE PP3_Strong (+4) + PM1 (+2) + PM2 (+1) = +7 -> Likely Pathogenic (predictors not stacked)."
+    },
+    {
+      "id": "CONS-01",
+      "gene": "POLY3",
+      "ancestry": "Latino",
+      "expected": "Likely Benign",
+      "signals": {
+        "gnomad_af": 0.02,
+        "conservation": -2.0
+      },
+      "population": "Latino",
+      "vcep_group": null,
+      "note": "A3 conservation: fast-evolving position -> BP4_Supporting (-1) + BS1 (gnomAD 2%, -4) = -5 -> Likely Benign."
     }
   ]
 }

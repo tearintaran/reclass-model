@@ -35,7 +35,7 @@ import os
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from engine.scoring import derive_criteria_from_signals
 from engine.normalize import add_build as _add_build

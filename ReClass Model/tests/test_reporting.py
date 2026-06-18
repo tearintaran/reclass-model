@@ -136,6 +136,10 @@ class TestReviewerReport(unittest.TestCase):
         receipt, _ = _receipt()
         report = build_reviewer_report(classification=receipt)
         self.assertEqual(len(report["criteria"]), 2)
+        self.assertIn("revel", report["evidence_by_source"])
+        self.assertIn("gnomad", report["evidence_by_source"])
+        md = render_reviewer_markdown(report)
+        self.assertNotIn("No standardized evidence events were resolved", md)
 
 
 class TestPatientSummary(unittest.TestCase):

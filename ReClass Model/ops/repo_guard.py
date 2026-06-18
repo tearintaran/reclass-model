@@ -19,7 +19,12 @@ Pure logic (:func:`check_paths`) is import-only and stdlib-only so it is unit-te
 without git; the :func:`main` CLI wraps it as a git ``pre-commit`` hook:
 
     # .git/hooks/pre-commit
-    exec "$REPO/.venv/bin/python" "ReClass Model/ops/repo_guard.py" --staged
+    exec "$REPO/.venv/bin/python" "ReClass Model/ops/repo_guard.py" --staged \
+         --repo-root "$REPO"
+
+or install it from the repository root:
+
+    python "ReClass Model/ops/repo_guard.py" --install-hook
 
 Exit code 0 = clean, 1 = at least one prohibited path (commit should be aborted).
 """
@@ -39,6 +44,7 @@ PRIVATE_CLINICAL = "private_clinical"
 OVERSIZED = "oversized"
 
 DEFAULT_SIZE_LIMIT = 5 * 1024 * 1024  # 5 MiB
+HOOK_REL_PATH = os.path.join(".git", "hooks", "pre-commit")
 
 _FASTA_SUFFIXES = (".fa", ".fasta", ".fai", ".2bit")
 _ARCHIVE_SUFFIXES = (
@@ -128,15 +134,56 @@ def staged_paths(repo_root: str = ".") -> List[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+def hook_script(*, python_executable: str = ".venv/bin/python",
+                model_dir: str = "ReClass Model") -> str:
+    """Return the reproducible pre-commit hook body for this repository."""
+    guard_path = os.path.join(model_dir, "ops", "repo_guard.py")
+    return "\n".join([
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'REPO="$(git rev-parse --show-toplevel)"',
+        f'exec "$REPO/{python_executable}" "$REPO/{guard_path}" '
+        '--staged --repo-root "$REPO"',
+        "",
+    ])
+
+
+def install_pre_commit_hook(repo_root: str = ".",
+                            *,
+                            python_executable: str = ".venv/bin/python",
+                            model_dir: str = "ReClass Model") -> str:
+    """Install the repo guard as ``.git/hooks/pre-commit`` and return its path."""
+    hooks_dir = os.path.join(repo_root, ".git", "hooks")
+    if not os.path.isdir(hooks_dir):
+        raise FileNotFoundError(f"git hooks directory not found: {hooks_dir}")
+    hook_path = os.path.join(repo_root, HOOK_REL_PATH)
+    with open(hook_path, "w", encoding="utf-8") as fh:
+        fh.write(hook_script(python_executable=python_executable, model_dir=model_dir))
+    os.chmod(hook_path, 0o755)
+    return hook_path
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", help="paths to check (default: git staged)")
     parser.add_argument("--staged", action="store_true",
                         help="check git's staged files (use as a pre-commit hook)")
+    parser.add_argument("--install-hook", action="store_true",
+                        help="install .git/hooks/pre-commit for this repository")
     parser.add_argument("--repo-root", default=".", help="repository root")
     parser.add_argument("--size-limit", type=int, default=DEFAULT_SIZE_LIMIT,
                         help=f"oversized threshold in bytes (default {DEFAULT_SIZE_LIMIT})")
     args = parser.parse_args(argv)
+
+    if args.install_hook:
+        try:
+            hook_path = install_pre_commit_hook(args.repo_root)
+        except OSError as exc:
+            print(f"[repo-guard] failed to install pre-commit hook: {exc}",
+                  file=sys.stderr)
+            return 1
+        print(f"[repo-guard] installed pre-commit hook: {_norm(hook_path)}")
+        return 0
 
     if args.staged or not args.paths:
         try:

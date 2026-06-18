@@ -86,6 +86,8 @@ def verify_bundle_provenance(cur, bundle_id: str, *, stored_hash: str,
         return [f"bundle {bundle_id} not found"]
 
     bundle = ev.get_evidence_bundle(cur, bundle_id)
+    if bundle is None:
+        return [f"bundle {bundle_id} could not be reconstructed"]
     recomputed = classify(bundle.events, engine_version=engine_version)
 
     if recomputed.reconstruction_hash != row["bundle_hash"]:

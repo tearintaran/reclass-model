@@ -64,7 +64,7 @@ def upsert_variant(cur, *, chrom: str, pos: int, ref: str, alt: str,
 def _contributions_to_json(contributions: Any) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for c in contributions:
-        rows.append(asdict(c) if is_dataclass(c) else dict(c))
+        rows.append(asdict(c) if is_dataclass(c) else dict(c))  # type: ignore[arg-type]
     return rows
 
 
@@ -75,14 +75,19 @@ def insert_classification(
     variant_id: str,
     classification,
     patient_id: Optional[str] = None,
+    evidence: Optional[Dict[str, Any]] = None,
     signed_off_by: Optional[str] = None,
     signed_off_at=None,
 ) -> str:
     """Persist a classification receipt produced by ``engine.scoring.classify``.
 
     ``classification`` is an ``engine.scoring.Classification`` (or any object with
-    the same attributes). Returns the new ``classification_id``. Must run inside a
-    tenant-scoped session matching ``tenant_id`` (RLS ``WITH CHECK``).
+    the same attributes). ``evidence`` is the resolved ``EvidenceBundle.to_dict()``
+    (transcript identity + PS4 cohort counts + provenance) when the result came
+    from evidence resolution; it is stored verbatim so reviewer/FHIR reports can
+    surface those fields, and is ``None`` for results scored from direct events.
+    Returns the new ``classification_id``. Must run inside a tenant-scoped session
+    matching ``tenant_id`` (RLS ``WITH CHECK``).
     """
     contributions = _contributions_to_json(classification.contributions)
     overrides = list(classification.overrides)
@@ -91,8 +96,8 @@ def insert_classification(
         INSERT INTO clinical.classification (
             tenant_id, patient_id, variant_id, tier, total_points,
             engine_version, reconstruction_hash, contributions, overrides,
-            signed_off_by, signed_off_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            evidence, signed_off_by, signed_off_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING classification_id
         """,
         (
@@ -105,6 +110,7 @@ def insert_classification(
             classification.reconstruction_hash,
             Jsonb(contributions),
             Jsonb(overrides),
+            Jsonb(evidence) if evidence is not None else None,
             signed_off_by,
             signed_off_at,
         ),
@@ -118,7 +124,7 @@ def get_classification(cur, classification_id: str) -> Optional[Dict[str, Any]]:
         """
         SELECT classification_id, tenant_id, patient_id, variant_id, tier,
                total_points, engine_version, reconstruction_hash, contributions,
-               overrides, signed_off_by, signed_off_at, created_at
+               overrides, evidence, signed_off_by, signed_off_at, created_at
           FROM clinical.classification
          WHERE classification_id = %s
         """,

@@ -44,6 +44,12 @@ env/
 *.2bit
 ReClass Model/data/reference/*
 !ReClass Model/data/reference/README.md
+# Track the small provenance/tooling files (NOT the multi-GB FASTA): the install
+# helper, the pinned source manifest, and the recorded source/version/checksum
+# sidecar are how the genome build stays auditable without committing the genome.
+!ReClass Model/data/reference/install_grch38.sh
+!ReClass Model/data/reference/GRCh38.source.json
+!ReClass Model/data/reference/GRCh38.fa.meta.json
 
 # --------------------------------------------------------------------------- #
 # Raw, local-only source data (large public downloads; NEVER commit).

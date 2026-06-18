@@ -1,0 +1,132 @@
+{
+  "version": "1.1.0",
+  "label": "Coverage extension v1 — additional ACMG/AMP evidence types & variant classes",
+  "description": "Reviewable thresholds for evidence types beyond the base ClinGen/REVEL/gnomAD slice (job1 task 4): PVS1 (LoF), PS3/BS3 (functional), PM3 (in-trans), PP1/BS4 (segregation), PP4 (phenotype), splice, and CNV; v1.1 adds five additional variant classes (gap.md A2): non-coding/regulatory, complex-indel, mitochondrial, repeat-expansion, and richer structural-variant. This is a SEPARATE config from base_v1.json (owned by clinical sign-off): it only adds derivation thresholds for new providers and never alters the base point model, tier cutoffs, or reconstruction hashes. The emitted criteria reuse the engine's standard strength keys (supporting/moderate/strong/very_strong/stand_alone), so the pure scoring engine sums them unchanged.",
+  "provenance": {
+    "pvs1": "Abou Tayoun et al. 2018 (ClinGen SVI PVS1 LoF decision-tree strengths).",
+    "functional": "Brnich et al. 2020 (ClinGen SVI functional-evidence OddsPath -> strength bins).",
+    "pm3": "ClinGen SVI Recommendation for in-trans (PM3) point system v1.0 (Sept 2019).",
+    "segregation": "Jarvik & Browning 2016 (segregation likelihood-ratio -> PP1/BS4 strength).",
+    "phenotype": "ACMG/AMP 2015 PP4 with ClinGen SVI phenotype-specificity strength tiers.",
+    "splice": "SpliceAI delta-score bins (Jaganathan et al. 2018) mapped to PP3/BP4; canonical ±1,2 sites route to PVS1.",
+    "cnv": "ClinGen/ACMG 2020 technical standards for CNV interpretation (simplified, configurable).",
+    "noncoding": "ACMG/AMP 2015 + ClinGen SVI guidance for non-coding/regulatory variants (promoter/5'UTR uORF/deep-intronic); maps categorized regulatory effects to PM/PP/BP-level criteria where defined.",
+    "complex_indel": "ACMG/AMP 2015 PM4 (in-frame protein-length change outside a repeat region) and PVS1 (frameshift in a LoF-mechanism gene) for multi-base/delins indels that parsimonious trimming alone does not resolve.",
+    "mito": "mtDNA-specific thresholds (diverge from the autosomal model): MITOMAP/HelixMTdb population-frequency cut-points and heteroplasmy-segregation evidence per the ClinGen Mitochondrial Disease / mtDNA ACMG specification (McCormick et al. 2020).",
+    "repeat": "Short-tandem-repeat / expansion loci: per-locus normal/intermediate/reduced-penetrance/pathogenic repeat-count thresholds (e.g. HD CAG >=40 full penetrance); a full-penetrance expansion routes to PVS1, reduced-penetrance to PVS1_Moderate.",
+    "sv": "Richer structural-variant interpretation beyond the simple CNV dosage map (ClinGen/ACMG 2020 CNV technical standards, simplified): breakpoint context and dosage-sensitive (haploinsufficient/triplosensitive) gene overlap.",
+    "status": "Reconstructed, reviewable defaults. Confirm against the current ClinGen SVI / disease-VCEP specifications before clinical use. Strength keys are constrained to the base engine's STRENGTH_POINTS."
+  },
+  "pvs1": {
+    "comment": "Loss-of-function consequence -> PVS1 strength, per the SVI PVS1 decision tree. require_lof_mechanism gates PVS1 to genes whose established disease mechanism is LoF.",
+    "require_lof_mechanism": true,
+    "default_strength": "very_strong",
+    "lof_consequences": {
+      "nonsense": "very_strong",
+      "stop_gained": "very_strong",
+      "frameshift": "very_strong",
+      "splice_donor": "very_strong",
+      "splice_acceptor": "very_strong",
+      "canonical_splice": "very_strong",
+      "exon_deletion": "very_strong",
+      "multiexon_deletion": "very_strong",
+      "start_lost": "moderate",
+      "initiation_codon": "moderate",
+      "stop_lost": "moderate"
+    },
+    "nmd_escape_strength": "strong",
+    "removes_lt_10pct_strength": "supporting"
+  },
+  "functional": {
+    "comment": "Well-established functional assays. oddspath_* bins map a calibrated OddsPath to a strength (Brnich 2020). When no OddsPath is given, a binary damaging/benign result uses ps3_default_strength / bs3_default_strength.",
+    "ps3_default_strength": "strong",
+    "bs3_default_strength": "strong",
+    "oddspath_pathogenic": [[18.7, "strong"], [4.3, "moderate"], [2.1, "supporting"]],
+    "oddspath_benign": [[0.053, "strong"], [0.23, "moderate"], [0.48, "supporting"]]
+  },
+  "pm3": {
+    "comment": "In-trans-with-pathogenic point system (recessive). Sum point_values across observations, then map the total to a PM3 strength. point_values are illustrative SVI defaults.",
+    "points_to_strength": [[4.0, "very_strong"], [2.0, "strong"], [1.0, "moderate"], [0.5, "supporting"]],
+    "point_values": {
+      "trans_pathogenic": 1.0,
+      "trans_likely_pathogenic": 0.5,
+      "trans_uncertain": 0.25,
+      "homozygous_confirmed": 0.5,
+      "phase_unknown": 0.25
+    }
+  },
+  "segregation": {
+    "comment": "Informative-meioses count -> PP1 (cosegregation, pathogenic) or BS4 (non-segregation, benign) strength. Thresholds approximate the LR cut-points in Jarvik & Browning 2016 (LR 4:1 / 16:1 / 32:1).",
+    "pp1_meioses": [[7, "strong"], [5, "moderate"], [3, "supporting"]],
+    "bs4_meioses": [[7, "strong"], [5, "moderate"], [3, "supporting"]]
+  },
+  "phenotype": {
+    "comment": "PP4 phenotype specificity -> strength. A highly specific phenotype (e.g. a gene-specific clinical/biochemical profile) supports PP4_Moderate.",
+    "pp4_specificity": {
+      "high": "moderate",
+      "moderate": "supporting",
+      "low": null
+    }
+  },
+  "splice": {
+    "comment": "SpliceAI max delta -> PP3 (pathogenic) / BP4 (benign). A variant at a canonical ±1,2 splice position routes to PVS1 (splice) at canonical_site_pvs1_strength rather than PP3.",
+    "pp3": [[0.8, "strong"], [0.5, "moderate"], [0.2, "supporting"]],
+    "bp4": [[0.1, "supporting"]],
+    "canonical_site_pvs1_strength": "very_strong"
+  },
+  "cnv": {
+    "comment": "Simplified, configurable CNV dosage mapping. A full-gene (or multi-exon) loss of an established haploinsufficient gene routes to PVS1; an in-frame partial loss routes to PM4; a full-gene gain of a triplosensitive gene routes to a supporting/moderate criterion.",
+    "del_full_gene_haploinsufficient": {"criterion": "PVS1", "strength": "very_strong"},
+    "del_multiexon_haploinsufficient": {"criterion": "PVS1", "strength": "strong"},
+    "del_partial_inframe": {"criterion": "PM4", "strength": "moderate"},
+    "dup_full_gene_triplosensitive": {"criterion": "PM4", "strength": "moderate"}
+  },
+  "noncoding": {
+    "comment": "Non-coding / regulatory variant categories -> ACMG criteria where defined. A categorized regulatory effect (established promoter element, 5'UTR uORF creation, predicted deep-intronic splice gain, predicted regulatory damage) routes to a PM/PP-level criterion; a non-conserved no-predicted-effect non-coding change routes to BP7; a predicted-benign one to BP4. Unknown categories yield nothing (recorded as not-applicable).",
+    "category_map": {
+      "promoter_established":            {"criterion": "PM1", "direction": "pathogenic", "strength": "moderate"},
+      "utr5_uorf_created":               {"criterion": "PM4", "direction": "pathogenic", "strength": "moderate"},
+      "deep_intronic_predicted_splice":  {"criterion": "PP3", "direction": "pathogenic", "strength": "supporting"},
+      "regulatory_predicted_damaging":   {"criterion": "PP3", "direction": "pathogenic", "strength": "supporting"},
+      "noncoding_predicted_benign":      {"criterion": "BP4", "direction": "benign",     "strength": "supporting"},
+      "noncoding_no_predicted_effect":   {"criterion": "BP7", "direction": "benign",     "strength": "supporting"}
+    }
+  },
+  "complex_indel": {
+    "comment": "Multi-base / delins indels that parsimonious trimming alone does not resolve. A frameshift complex indel in a gene whose disease mechanism is loss-of-function routes to PVS1; an in-frame length-changing indel outside a repeat/low-complexity region routes to PM4; an in-frame indel inside a repeat region is non-actionable (PM4 is not applicable there per the ACMG caveat) and recorded as not-applicable. A frameshift without an established LoF mechanism (possible gain-of-function) yields nothing.",
+    "frameshift_lof_strength": "very_strong",
+    "inframe_nonrepeat_strength": "moderate",
+    "inframe_repeat_region_actionable": false
+  },
+  "mito": {
+    "comment": "Mitochondrial (mtDNA) rule set; diverges from the autosomal model. Population-frequency cut-points are far lower than the nuclear BA1/BS1/PM2 (mtDNA homoplasmy in MITOMAP/HelixMTdb), and heteroplasmy that segregates with phenotype is case-control-like evidence. Frequency is evaluated first (BA1 is decisive); when frequency is intermediate or absent, a segregating heteroplasmy load contributes PS4-level evidence.",
+    "ba1_af": 0.005,
+    "bs1_af": 0.002,
+    "pm2_af": 0.00002,
+    "heteroplasmy_min_load": 0.6,
+    "heteroplasmy_segregation_strength": "moderate"
+  },
+  "repeat": {
+    "comment": "Short-tandem-repeat / expansion loci with a structured repeat count. A count >= the locus pathogenic_min routes to PVS1 (full-penetrance expansion, the established disease mechanism); a count in the reduced-penetrance band routes to PVS1 at reduced strength; normal/intermediate counts are non-actionable. Per-locus thresholds are reviewable disease defaults (e.g. HD CAG: <=26 normal, 27-35 intermediate, 36-39 reduced penetrance, >=40 full penetrance).",
+    "pathogenic_strength": "very_strong",
+    "reduced_penetrance_strength": "moderate",
+    "loci": {
+      "HTT":   {"normal_max": 26, "intermediate_max": 35, "reduced_penetrance_max": 39, "pathogenic_min": 40},
+      "FMR1":  {"normal_max": 44, "intermediate_max": 54, "reduced_penetrance_max": 200, "pathogenic_min": 201},
+      "ATXN1": {"normal_max": 35, "intermediate_max": 38, "reduced_penetrance_max": 43, "pathogenic_min": 39},
+      "FXN":   {"normal_max": 33, "intermediate_max": 65, "reduced_penetrance_max": 65, "pathogenic_min": 66},
+      "DMPK":  {"normal_max": 34, "intermediate_max": 49, "reduced_penetrance_max": 49, "pathogenic_min": 50}
+    }
+  },
+  "sv": {
+    "comment": "Richer structural-variant interpretation beyond the simple CNV dosage map: breakpoint context and dosage-sensitive gene overlap. A deletion of an established haploinsufficient gene routes to PVS1; a duplication of an established triplosensitive gene or a breakpoint disrupting a gene routes to PM4; a gain with no known dosage effect routes to BP4; a common benign SV routes to BA1. Categories tagged dosage-sensitive additionally require, when a gene is supplied, that the gene is in dosage_sensitive_genes (else not-applicable).",
+    "category_map": {
+      "del_haploinsufficient_gene": {"criterion": "PVS1", "direction": "pathogenic", "strength": "very_strong", "requires_dosage_sensitive": true},
+      "dup_triplosensitive_gene":   {"criterion": "PM4",  "direction": "pathogenic", "strength": "moderate",    "requires_dosage_sensitive": true},
+      "del_breakpoint_in_gene":     {"criterion": "PM4",  "direction": "pathogenic", "strength": "moderate"},
+      "dup_no_known_dosage_effect": {"criterion": "BP4",  "direction": "benign",     "strength": "supporting"},
+      "sv_benign_common":           {"criterion": "BA1",  "direction": "benign",     "strength": "stand_alone"}
+    },
+    "dosage_sensitive_genes": ["TP53", "PTEN", "NF1", "BRCA1", "BRCA2", "MECP2", "PMP22", "RB1", "MLH1", "MSH2"]
+  }
+}

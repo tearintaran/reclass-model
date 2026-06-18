@@ -24,7 +24,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from engine import config as _C
 from engine.scoring import EvidenceEvent, classify
 from storage.alerts import ALERT_STATES, is_serious_crossing
 
@@ -67,6 +66,7 @@ class ClinicalStore:
     def insert_classification(
         self, *, tenant_id: str, chrom: str, pos: int, ref: str, alt: str,
         build: str, classification, patient_mrn: Optional[str] = None,
+        evidence: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
@@ -134,7 +134,7 @@ class DbClinicalStore(ClinicalStore):
         return tenant_session(conn, tenant_id, role=self._role)
 
     def insert_classification(self, *, tenant_id, chrom, pos, ref, alt, build,
-                              classification, patient_mrn=None):
+                              classification, patient_mrn=None, evidence=None):
         from storage import classifications as cls
 
         with self._conn() as conn:
@@ -148,6 +148,7 @@ class DbClinicalStore(ClinicalStore):
                 cid = cls.insert_classification(
                     cur, tenant_id=tenant_id, variant_id=variant_id,
                     classification=classification, patient_id=patient_id,
+                    evidence=evidence,
                 )
                 return serialize_receipt(cls.get_classification(cur, cid))
 
@@ -299,7 +300,8 @@ class InMemoryClinicalStore(ClinicalStore):
                 if r["variant_key"] == variant_key]
         return rows[-1] if rows else None
 
-    def _store_receipt(self, tenant_id, variant_key, classification, patient_mrn) -> Dict[str, Any]:
+    def _store_receipt(self, tenant_id, variant_key, classification, patient_mrn,
+                       evidence=None) -> Dict[str, Any]:
         receipt = {
             "classification_id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
@@ -312,6 +314,7 @@ class InMemoryClinicalStore(ClinicalStore):
             "reconstruction_hash": classification.reconstruction_hash,
             "contributions": [_jsonable(c.__dict__) for c in classification.contributions],
             "overrides": list(classification.overrides),
+            "evidence": _jsonable(evidence) if evidence is not None else None,
             "signed_off_by": None,
             "signed_off_at": None,
             "created_at": _now(),
@@ -321,10 +324,10 @@ class InMemoryClinicalStore(ClinicalStore):
 
     # -- interface ---------------------------------------------------------- #
     def insert_classification(self, *, tenant_id, chrom, pos, ref, alt, build,
-                              classification, patient_mrn=None):
+                              classification, patient_mrn=None, evidence=None):
         vk = self._variant_key(chrom, pos, ref, alt, build)
         return serialize_receipt(
-            self._store_receipt(tenant_id, vk, classification, patient_mrn)
+            self._store_receipt(tenant_id, vk, classification, patient_mrn, evidence)
         )
 
     def get_classification(self, *, tenant_id, classification_id):

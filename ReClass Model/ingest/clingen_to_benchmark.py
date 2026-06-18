@@ -27,6 +27,14 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+
+from ingest.hgvs import (  # noqa: E402
+    locus_from_hgvs_list,
+    pick_coding_hgvs,
+    pick_grch38_genomic_hgvs,
+)
+
 RAW = os.path.join(ROOT, "data", "raw", "clingen_erepo.tsv")
 OUT = os.path.join(ROOT, "validation", "fixtures", "clingen_real_v1.json")
 
@@ -108,6 +116,9 @@ def main() -> None:
     skipped_assertion: dict[str, int] = {}
     skipped_no_codes = 0
     retracted = 0
+    with_locus = 0
+    with_indel_hgvs = 0
+    with_transcript = 0
 
     # ERepo free-text fields ('Summary of interpretation') contain stray double
     # quotes; quote-aware CSV silently merges rows on them. The export is strictly
@@ -141,18 +152,54 @@ def main() -> None:
             cv_id = (row.get("ClinVar Variation Id") or "").strip()
             variation = (row.get("#Variation") or "").strip()
 
-            cases.append({
+            hgvs_cell = row.get("HGVS Expressions") or ""
+            # Recover a GRCh38 SNV/MNV locus from the genomic substitution HGVS so the
+            # canonical-key fallback matcher has reference-free coordinates (job1 task 2/3).
+            locus = locus_from_hgvs_list(hgvs_cell)
+            if locus is not None:
+                with_locus += 1
+            # Also record the GRCh38 genomic HGVS token itself (substitution OR indel).
+            # For an indel this is the only handle on its coordinates: the deleted/
+            # duplicated bases need the FASTA, so the matching layer resolves the token
+            # against the reference (job1 task 1, the `hgvs_g` tier). Storing the token
+            # -- not the resolved locus -- keeps this ingest step reference-free and
+            # deterministic from the TSV alone.
+            genomic_hgvs = pick_grch38_genomic_hgvs(hgvs_cell)
+            if genomic_hgvs is not None and locus is None:
+                with_indel_hgvs += 1
+            # Carry the transcript identity (job1 task 4): the RefSeq coding HGVS names
+            # the transcript the panel interpreted against. ERepo does not flag MANE
+            # Select, so the RefSeq transcript is recorded under `refseq` (+ hgvs_c);
+            # the MANE Select field is left None rather than guessed.
+            coding = pick_coding_hgvs(hgvs_cell)
+            transcript = None
+            if coding is not None:
+                with_transcript += 1
+                transcript = {"refseq": coding[0], "hgvs_c": coding[1],
+                              "gene": gene, "source": "ClinGen ERepo"}
+
+            case = {
                 "id": f"CG-{cv_id or i}",
                 "gene": gene,
-                # ERepo carries no ancestry; stratify by VCEP so the per-group
-                # report is still meaningful. (True ancestry stratification needs
-                # gnomAD population AFs -- see ingest/README.)
+                # job1 task 5: separate the field families. ERepo carries no
+                # genetic-ancestry, so `population` is None; `vcep_group` holds the
+                # expert-panel grouping. `ancestry` is retained as a back-compatible
+                # alias of `vcep_group` for the existing harness, which buckets it as
+                # a panel (not an ancestry) via grouping_kind().
+                "population": None,
+                "vcep_group": panel,
                 "ancestry": panel,
                 "expected": tier,
                 "signals": {"criteria": criteria},
                 "provenance": {"source": "ClinGen ERepo", "variation": variation,
-                               "clinvar_id": cv_id},
-            })
+                               "clinvar_id": cv_id,
+                               "grch38_hgvs": genomic_hgvs},
+            }
+            if locus is not None:
+                case["locus"] = {k: locus[k] for k in ("chrom", "pos", "ref", "alt", "snv")}
+            if transcript is not None:
+                case["transcript"] = transcript
+            cases.append(case)
 
     benchmark = {
         "benchmark": "clingen_real_v1",
@@ -160,7 +207,19 @@ def main() -> None:
         "note": ("REAL expert-panel benchmark from the ClinGen Evidence Repository. "
                  "Each case feeds the engine the exact ACMG criteria the VCEP applied; "
                  "concordance measures whether the deterministic point-sum reproduces "
-                 "the panel's final tier."),
+                 "the panel's final tier. Cases also carry a GRCh38 SNV/MNV `locus` "
+                 "(parsed from the genomic HGVS) plus the genomic HGVS token itself in "
+                 "`provenance.grch38_hgvs` (substitution OR indel) so the canonical-key "
+                 "and HGVS-genomic fallback matchers can recover ClinVar cases with no "
+                 "Variation ID match -- indel tokens are resolved against the reference "
+                 "in the matching layer."),
+        "field_semantics": {
+            "population": "True genetic-ancestry / population-stratification group. "
+                          "None here: ERepo carries no per-case ancestry.",
+            "vcep_group": "ClinGen VCEP / expert-panel grouping (NOT an ancestry).",
+            "ancestry": "Back-compatible alias of vcep_group for the existing harness; "
+                        "prefer population (ancestry) and vcep_group (panel).",
+        },
         "source_file": "data/raw/clingen_erepo.tsv",
         "cases": cases,
     }
@@ -171,6 +230,9 @@ def main() -> None:
         f.write("\n")
 
     print(f"Wrote {len(cases)} real cases -> {OUT}")
+    print(f"  with GRCh38 SNV/MNV locus:  {with_locus}")
+    print(f"  with GRCh38 indel HGVS only: {with_indel_hgvs}")
+    print(f"  with transcript identity:    {with_transcript}")
     print(f"  malformed rows skipped:   {malformed}")
     print(f"  retracted skipped:        {retracted}")
     print(f"  no parseable criteria:    {skipped_no_codes}")

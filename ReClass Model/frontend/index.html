@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReClass Reviewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>ReClass Clinical Reviewer</h1>
+    <p class="subtitle">Resolve evidence → classify → review → sign-off → alerts</p>
+  </header>
+
+  <section id="session-panel" class="panel">
+    <h2>Session</h2>
+    <div class="grid">
+      <label>API base URL
+        <input id="api-base" type="text" value="" placeholder="http://127.0.0.1:8000">
+      </label>
+      <label>Tenant ID (UUID)
+        <input id="tenant-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+      </label>
+      <label>Bearer token
+        <input id="bearer-token" type="password" placeholder="JWT or API key" autocomplete="off">
+      </label>
+    </div>
+    <button id="save-session">Save session</button>
+    <span id="session-status" class="status"></span>
+    <p class="hint" id="token-hint"></p>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="workflow">Workflow</button>
+    <button class="tab" data-tab="drafts">Drafts</button>
+    <button class="tab" data-tab="alerts">Alerts</button>
+  </nav>
+
+  <main id="tab-workflow" class="tab-panel active">
+    <section class="panel">
+      <h2>Variant</h2>
+      <div class="grid variant-grid">
+        <label>Chrom <input id="chrom" value="1"></label>
+        <label>Pos <input id="pos" type="number" value="100"></label>
+        <label>Ref <input id="ref" value="A"></label>
+        <label>Alt <input id="alt" value="G"></label>
+        <label>Build <input id="build" value="GRCh38"></label>
+        <label>Patient MRN (optional) <input id="patient-mrn"></label>
+      </div>
+      <div class="actions">
+        <button id="btn-resolve">1. Resolve evidence</button>
+        <button id="btn-classify">2. Classify preview</button>
+        <button id="btn-persist">3. Persist draft</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Evidence sources</h2>
+      <p class="hint">Providers are discovered from the resolved evidence — none are hardcoded.
+        Uncheck a source to re-resolve with a subset.</p>
+      <div id="provider-panel" class="provider-panel"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Evidence bundle</h2>
+      <div id="evidence-region" class="region"></div>
+      <details class="raw">
+        <summary>Raw evidence JSON</summary>
+        <pre id="evidence-raw" class="output"></pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Classification</h2>
+      <div id="classification-region" class="region"></div>
+      <details class="raw">
+        <summary>Raw classification JSON</summary>
+        <pre id="classification-raw" class="output"></pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Warnings</h2>
+      <div id="warnings-region" class="region"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Reviewer report</h2>
+      <div class="actions">
+        <button id="btn-reviewer-json">Load reviewer report</button>
+        <button id="btn-reviewer-md">Markdown</button>
+        <button id="btn-summary">Patient summary</button>
+      </div>
+      <div id="reviewer-region" class="region"></div>
+      <details class="raw">
+        <summary>Raw report</summary>
+        <pre id="reviewer-raw" class="output"></pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Credentialed sign-off</h2>
+      <div id="signoff-release" class="region"></div>
+      <div class="grid">
+        <label>Signed off by
+          <input id="signer" placeholder="Dr. Reviewer, MD">
+        </label>
+        <label>Credential
+          <input id="credential" placeholder="Board certification ID">
+        </label>
+      </div>
+      <button id="btn-signoff">Sign off classification</button>
+      <p id="signoff-status" class="status"></p>
+    </section>
+  </main>
+
+  <main id="tab-drafts" class="tab-panel">
+    <section class="panel">
+      <h2>Draft classifications</h2>
+      <button id="btn-list-drafts">Refresh list</button>
+      <div id="draft-region" class="region"></div>
+    </section>
+  </main>
+
+  <main id="tab-alerts" class="tab-panel">
+    <section class="panel">
+      <h2>Tier-crossing alerts</h2>
+      <button id="btn-list-alerts">Refresh alerts</button>
+      <div id="alert-region" class="region"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

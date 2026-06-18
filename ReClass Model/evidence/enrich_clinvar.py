@@ -13,6 +13,34 @@ the engine or the expected labels: the benchmark's expected tier stays the ClinV
 label; only the input evidence grows. Concordance then measures how much of the gap
 was missing evidence rather than scoring logic.
 
+Match tiers, strongest first (every case is counted under exactly one route in
+``enrichment_summary.route_counts``); a weaker route never overrides a stronger one:
+
+  1. ``variation_id``            -- direct ClinVar Variation ID,
+  2. ``clinvar_allele_id``      -- ClinVar Allele ID, allele-precise (job1 task 3),
+  3. ``canonical_snv``          -- canonical coordinate / SNV-MNV key (reference-free,
+                                   via genomic HGVS parsed in ``ingest/hgvs.py``),
+  4. ``reference_backed_indel`` -- left-aligned indel from a native coordinate locus,
+  5. ``hgvs_g``                 -- indel recovered from the ClinGen genomic HGVS token
+                                   and left-aligned against the reference (job1 task 1),
+  6. ``spdi``                   -- NCBI SPDI resolved to a canonical genomic key (task 3),
+  7. ``hgvs_c_mane``            -- MANE-transcript + coding c.HGVS identity (job1 task 3),
+  8. ``hgvs_p_gene``            -- gene + protein p.HGVS,
+  9. ``source_synonym``         -- other local source synonym.
+
+Tiers 8-9 stay **structurally not buildable from the available local fields** and are
+reported as a constant 0 (with this reasoning), NOT silently dropped. The allele-ID,
+SPDI, and MANE-transcript tiers (2, 6, 7) are now *buildable* and add matches as soon
+as the ClinVar / ClinGen sources carry those identities; on a fixture that carries
+only ``gene``, a genomic ``locus``, the Variation ID, gnomAD AF and REVEL they remain
+0 until a future export adds an Allele ID, an SPDI, or a transcript c.HGVS. Re-run the
+enrichment when it does.
+
+A fallback key that maps to multiple, non-criteria-equivalent ClinGen records is counted
+under ``ambiguous`` and imports nothing (the no-match is never treated as benign); a
+locus that fails to normalize is counted under ``normalization_failed``; a clean miss is
+``unmatched``.
+
 Run from ``ReClass Model/``:
 
     ../.venv/bin/python evidence/enrich_clinvar.py
@@ -47,7 +75,9 @@ BENCHMARK_NAME = "clinvar_enriched_v1"
 
 
 # Per-case match-detail bucket -> the report column it rolls up into. A canonical
-# match is classified by HOW the case locus normalized (see engine.normalize).
+# match is classified by HOW the case locus normalized (see engine.normalize). Kept
+# for back-compatible per-case ``match_detail`` strings; the authoritative per-route
+# accounting is ``enrichment.route`` (see ``_route_of``).
 _METHOD_TO_DETAIL = {
     "snv": "canonical_snv_key",
     "mnv": "canonical_snv_key",
@@ -55,9 +85,27 @@ _METHOD_TO_DETAIL = {
     "reference_free_trim": "canonical_indel_key_unaligned",
 }
 
+#: The fallback routes that actually import criteria (everything else -- ambiguous,
+#: normalization_failed, unmatched -- leaves the case's evidence unknown). job1 task 3
+#: added the allele-ID, SPDI, and MANE-transcript (hgvs_c_mane) enriching routes.
+ENRICHING_ROUTES = (
+    "variation_id", "clinvar_allele_id", "canonical_snv", "reference_backed_indel",
+    "hgvs_g", "spdi", "hgvs_c_mane",
+)
+
+#: The full, ordered partition every case rolls up into (sums to total_cases). The
+#: ``hgvs_p_gene`` / ``source_synonym`` tiers stay a constant 0 -- not buildable from
+#: local ClinVar fields (see module docstring); ``hgvs_c_mane``, ``clinvar_allele_id``,
+#: and ``spdi`` are now buildable when the source carries those identities (job1 task 3).
+ROUTE_COLUMNS = (
+    "variation_id", "clinvar_allele_id", "canonical_snv", "reference_backed_indel",
+    "hgvs_g", "spdi", "hgvs_c_mane", "hgvs_p_gene", "source_synonym",
+    "ambiguous", "normalization_failed", "unmatched",
+)
+
 
 def _match_detail(bundle) -> str:
-    """Classify a bundle's match into a report bucket.
+    """Classify a bundle's match into a back-compatible report bucket.
 
     One of: ``variation_id`` (direct ClinVar Variation ID), ``canonical_snv_key``
     (reference-free SNV/MNV key), ``reference_backed_indel_key`` (left-aligned indel),
@@ -71,6 +119,25 @@ def _match_detail(bundle) -> str:
     if mt == "canonical_key":
         return _METHOD_TO_DETAIL.get(match.get("normalization_method"), "canonical_key")
     return "none"
+
+
+def _route_of(bundle) -> str:
+    """Classify a bundle into exactly ONE job1 route column.
+
+    Returns one of :data:`ROUTE_COLUMNS`. Ambiguity and normalization failure take
+    precedence over the coordinate route, so a non-enriched case is never mistaken for
+    an enriched one. The provider tags ``match['route']`` directly; this only adds the
+    not-matched outcomes (``ambiguous`` / ``normalization_failed`` / ``unmatched``).
+    """
+    match = bundle.match or {}
+    if match.get("ambiguous"):
+        return "ambiguous"
+    route = match.get("route")
+    if route in ENRICHING_ROUTES:
+        return route
+    if match.get("normalized") is False:
+        return "normalization_failed"
+    return "unmatched"
 
 
 def enrich_case(case: dict, provider: ClinGenEvidenceProvider) -> dict:
@@ -87,8 +154,9 @@ def enrich_case(case: dict, provider: ClinGenEvidenceProvider) -> dict:
     bundle = provider.fetch(case)
     match = bundle.match or {}
     detail = _match_detail(bundle)
-    matched = detail != "none"
-    by_variation_id = detail == "variation_id"
+    route = _route_of(bundle)
+    matched = route in ENRICHING_ROUTES
+    by_variation_id = route == "variation_id"
 
     added = 0
     if matched:
@@ -104,10 +172,16 @@ def enrich_case(case: dict, provider: ClinGenEvidenceProvider) -> dict:
         "matched": matched,
         "match_type": match.get("match_type", "none"),
         "match_detail": detail,
+        # Authoritative per-route bucket (one of evidence.enrich_clinvar.ROUTE_COLUMNS).
+        "route": route,
+        "ambiguous": bool(match.get("ambiguous")),
         "clingen_case_id": match.get("clingen_case_id") if matched else None,
         "providers": [PROVIDER_NAME] if matched else [],
         "criteria_added": added,
         "normalization_failed": bool(match.get("normalized") is False),
+        # Preserve enough raw match detail for debugging an ambiguous / multi-record key.
+        "candidate_count": match.get("candidate_count", 0),
+        "candidate_ids": list(match.get("candidate_ids") or []),
         "warnings": list(bundle.warnings),
     }
     return out
@@ -120,15 +194,28 @@ def build_enriched(clinvar: dict, provider: ClinGenEvidenceProvider) -> dict:
     def _count(detail: str) -> int:
         return sum(1 for c in enriched_cases if c["enrichment"]["match_detail"] == detail)
 
-    by_variation_id = _count("variation_id")
-    by_canonical_snv = _count("canonical_snv_key")
-    by_reference_indel = _count("reference_backed_indel_key")
+    def _route(route: str) -> int:
+        return sum(1 for c in enriched_cases if c["enrichment"]["route"] == route)
+
+    # Authoritative per-route partition (job1): one bucket per case, sums to total.
+    route_counts = {col: _route(col) for col in ROUTE_COLUMNS}
+    total = len(enriched_cases)
+
+    by_variation_id = route_counts["variation_id"]
+    by_allele_id = route_counts["clinvar_allele_id"]
+    by_canonical_snv = route_counts["canonical_snv"]
+    by_reference_indel = route_counts["reference_backed_indel"]
+    by_hgvs_g = route_counts["hgvs_g"]
+    by_spdi = route_counts["spdi"]
+    by_hgvs_c_mane = route_counts["hgvs_c_mane"]
+    ambiguous = route_counts["ambiguous"]
+    normalization_failed = route_counts["normalization_failed"]
+    # Advisory legacy bucket: indel keyed without a reference (0 when a FASTA is present).
     by_canonical_indel_unaligned = _count("canonical_indel_key_unaligned")
-    canonical_total = by_canonical_snv + by_reference_indel + by_canonical_indel_unaligned
-    matched = sum(1 for c in enriched_cases if c["enrichment"]["matched"])
-    normalization_failed = sum(
-        1 for c in enriched_cases if c["enrichment"]["normalization_failed"]
-    )
+    # SPDI resolves to a canonical genomic key, so it rolls into the canonical total.
+    canonical_total = by_canonical_snv + by_reference_indel + by_hgvs_g + by_spdi
+    # Authoritative matched count: every enriching route (job1 task 3), summed once.
+    matched = sum(route_counts[r] for r in ENRICHING_ROUTES)
 
     criteria_added_cases = sum(1 for c in enriched_cases if c["enrichment"]["criteria_added"] > 0)
     criteria_added_total = sum(c["enrichment"]["criteria_added"] for c in enriched_cases)
@@ -139,14 +226,13 @@ def build_enriched(clinvar: dict, provider: ClinGenEvidenceProvider) -> dict:
     multiple_match_cases = sum(
         1 for c in enriched_cases if "multiple_clingen_matches" in c["enrichment"]["warnings"]
     )
-    total = len(enriched_cases)
 
     # SNV/indel duplicate & mismatch rates over the ClinVar loci, before vs after
     # reference-backed normalization (reference used only if a local FASTA exists).
     loci = [locus_from_case(c) for c in clinvar.get("cases", [])]
-    identity_audit = audit_loci([l for l in loci if l is not None],
+    identity_audit = audit_loci([loc for loc in loci if loc is not None],
                                 reference=getattr(provider, "reference", None))
-    identity_audit["cases_without_locus"] = sum(1 for l in loci if l is None)
+    identity_audit["cases_without_locus"] = sum(1 for loc in loci if loc is None)
 
     return {
         "benchmark": BENCHMARK_NAME,
@@ -170,13 +256,22 @@ def build_enriched(clinvar: dict, provider: ClinGenEvidenceProvider) -> dict:
             "clingen_variation_id_matches": by_variation_id,
             # New: how many cases matched by each identity route (acceptance A).
             "match_by_variation_id": by_variation_id,
+            "match_by_clinvar_allele_id": by_allele_id,
             "match_by_canonical_snv_key": by_canonical_snv,
             "match_by_reference_indel_key": by_reference_indel,
+            "match_by_hgvs_g": by_hgvs_g,
+            "match_by_spdi": by_spdi,
+            "match_by_hgvs_c_mane": by_hgvs_c_mane,
             "match_by_canonical_indel_key_unaligned": by_canonical_indel_unaligned,
             "canonical_key_matches": canonical_total,
             "matched_total": matched,
             "unmatched": total - matched,
+            "ambiguous": ambiguous,
             "normalization_failed": normalization_failed,
+            # job1 per-route accounting: one bucket per case, sums to total_cases. Tiers
+            # hgvs_c_mane / hgvs_p_gene / source_synonym are a constant 0 -- not buildable
+            # from ClinVar's local fields (see module docstring).
+            "route_counts": route_counts,
             "criteria_added_cases": criteria_added_cases,
             "criteria_added_total": criteria_added_total,
             "cases_with_warnings": cases_with_warnings,
@@ -219,13 +314,15 @@ def main(argv: list | None = None) -> int:
     print(f"  ClinGen Variation ID index size:     {s['clingen_index_size']}")
     print(f"  ClinGen canonical-key index size:    {s['clingen_canonical_index_size']}")
     print(f"  ClinGen rows skipped (no valid VID):  {s['clingen_skipped_invalid_id']}")
-    print(f"  matched by Variation ID:              {s['match_by_variation_id']}")
-    print(f"  matched by canonical SNV key:         {s['match_by_canonical_snv_key']}")
-    print(f"  matched by reference-backed indel key:{s['match_by_reference_indel_key']}")
-    print(f"  matched by indel key (unaligned):     {s['match_by_canonical_indel_key_unaligned']}")
+    rc = s["route_counts"]
+    print(f"  route counts (strongest -> weakest, sums to {s['total_cases']}):")
+    for col in ROUTE_COLUMNS:
+        note = "  (not buildable from local fields)" if col in (
+            "hgvs_p_gene", "source_synonym") else ""
+        print(f"    {col:24s} {rc[col]:>7}{note}")
     print(f"  matched (total):                      {s['matched_total']}")
-    print(f"  unmatched:                            {s['unmatched']}")
     print(f"  normalization failed:                 {s['normalization_failed']}")
+    print(f"  ambiguous (fallback, not enriched):   {s['ambiguous']}")
     print(f"  criteria added (total):               {s['criteria_added_total']}")
     print(f"  cases with warnings:                  {s['cases_with_warnings']}")
     print(f"  identity audit: SNV={a['snv']} indel={a['indel']} "

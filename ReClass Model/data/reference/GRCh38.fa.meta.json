@@ -1,0 +1,12 @@
+{
+  "build": "GRCh38",
+  "fasta_filename": "GRCh38.fa",
+  "fasta_path": "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model/data/reference/GRCh38.fa",
+  "notes": null,
+  "recorded_utc": "2026-06-16T23:01:52+00:00",
+  "sha256": "1e74081a49ceb9739cc14c812fbb8b3db978eb80ba8e5350beb80d8ad8dfef3b",
+  "size_bytes": 3151425851,
+  "source": "Ensembl GRCh38 primary assembly",
+  "source_url": "https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+  "version": "Ensembl release-110"
+}

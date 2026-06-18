@@ -10,6 +10,7 @@ Run from the project root (the ``ReClass Model/`` folder)::
 """
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from validation import calibration as CB
+from validation import fixture_splits as FS
 from validation import harness as H
 from engine.config_registry import get_config
 
@@ -87,6 +89,15 @@ class TestPureMetrics(unittest.TestCase):
 
 
 class TestThresholdSensitivity(unittest.TestCase):
+    def test_holdout_fixture_is_rejected_for_calibration_and_thresholds(self):
+        holdout = dict(BENCHMARK)
+        holdout["benchmark"] = "holdout_unit_v1"
+        holdout["fixture_split"] = "holdout"
+        with self.assertRaises(FS.HoldoutFixtureError):
+            CB.calibrate(holdout, run_sensitivity=False)
+        with self.assertRaises(FS.HoldoutFixtureError):
+            CB.threshold_sensitivity(holdout)
+
     def test_sensitivity_reports_deltas_vs_base(self):
         ts = CB.threshold_sensitivity(BENCHMARK)
         self.assertIn("base", ts)
@@ -114,14 +125,48 @@ class TestThresholdSensitivity(unittest.TestCase):
 
 
 class TestCalibrateAndRender(unittest.TestCase):
+    def test_split_manifests_are_disjoint_from_holdout(self):
+        FS.assert_split_manifests_disjoint()
+        members = FS.split_members()
+        self.assertFalse(members[FS.DEVELOPMENT] & members[FS.HOLDOUT])
+        self.assertFalse(members[FS.VALIDATION] & members[FS.HOLDOUT])
+
     def test_calibrate_structure(self):
         a = CB.calibrate(BENCHMARK)
         for key in ("overall", "by_vcep", "by_gene", "low_performing_genes",
-                    "serious_discordances", "threshold_sensitivity",
+                    "serious_discordances", "review_packets", "threshold_sensitivity",
                     "config_fingerprint"):
             self.assertIn(key, a)
         self.assertEqual(a["overall"]["serious"], 2)
         self.assertEqual(len(a["serious_discordances"]), 2)
+        self.assertEqual(len(a["review_packets"]), 2)
+
+    def test_calibration_review_packet_round_trips_json(self):
+        benchmark = {
+            "benchmark": "packet_tiny_v1",
+            "cases": [
+                _case(
+                    "PKT1",
+                    "GENE",
+                    "European",
+                    "Pathogenic",
+                    {
+                        "gnomad_af": 0.2,
+                        "ps4_cohort_counts": {"affected": 6, "unaffected": 0},
+                        "mane_select_transcript": "NM_000000.1",
+                    },
+                )
+            ],
+        }
+        packet = CB.calibrate(benchmark, run_sensitivity=False)["review_packets"][0]
+        self.assertIn("reviewer_decision", packet)
+        self.assertIn("override_proposal", packet)
+        self.assertIn("sign_off", packet)
+        self.assertIn("accepted", packet["override_proposal"])
+        self.assertIn("rejected", packet["override_proposal"])
+        self.assertEqual(packet["evidence_summary"]["ps4_cohort_counts"]["affected"], 6)
+        self.assertEqual(packet["evidence_summary"]["mane_transcript"], "NM_000000.1")
+        self.assertEqual(json.loads(json.dumps(packet)), packet)
 
     def test_markdown_has_all_sections(self):
         md = CB.render_markdown(CB.calibrate(BENCHMARK))
@@ -132,7 +177,6 @@ class TestCalibrateAndRender(unittest.TestCase):
             self.assertIn(heading, md)
 
     def test_run_writes_outputs(self):
-        import json
         with tempfile.TemporaryDirectory() as d:
             fdir = os.path.join(d, "validation", "fixtures")
             rdir = os.path.join(d, "validation", "reports")

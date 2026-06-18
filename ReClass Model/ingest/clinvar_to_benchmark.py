@@ -29,7 +29,6 @@ from __future__ import annotations
 import gzip
 import json
 import os
-import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -56,6 +55,24 @@ def parse_info(info: str) -> dict:
     return out
 
 
+def transcript_block(info: dict, gene: str) -> dict | None:
+    """Transcript identity for a ClinVar record (job1 task 4), or None.
+
+    The standard ClinVar VCF does not carry a per-transcript coding HGVS, so this is
+    populated only from optional INFO fields a pipeline may add (``MANE_SELECT`` /
+    ``MANE_PLUS_CLINICAL`` and a coding ``HGVSC``). When none are present the
+    transcript identity is left absent -- recorded as ``None``, never guessed -- and a
+    future export that adds these fields fills it in on re-ingest.
+    """
+    mane = info.get("MANE_SELECT") or None
+    mane_plus = info.get("MANE_PLUS_CLINICAL") or None
+    hgvs_c = info.get("HGVSC") or None
+    if not (mane or mane_plus or hgvs_c):
+        return None
+    return {"mane_select": mane, "mane_plus_clinical": mane_plus,
+            "hgvs_c": hgvs_c, "gene": gene, "source": "ClinVar"}
+
+
 def popmax_af(info: dict) -> float | None:
     """Use the max of the bundled ClinVar frequency sources as a popmax proxy.
 
@@ -79,6 +96,7 @@ def main() -> None:
 
     cases = []
     counts = {"kept": 0, "skip_revstat": 0, "skip_sig": 0}
+    with_transcript = 0
 
     with gzip.open(RAW, "rt", encoding="utf-8") as f:
         for line in f:
@@ -107,17 +125,32 @@ def main() -> None:
                 signals["gnomad_af"] = af
             # signals.revel is filled later by ingest/enrich_revel.py (missense SNVs only)
 
-            cases.append({
+            case = {
                 "id": f"CV-{vid}",
                 "gene": gene,
-                "ancestry": "Unspecified",   # ClinVar carries no ancestry
+                # job1 task 5: distinct field families. ClinVar carries neither a
+                # genetic-ancestry nor a VCEP grouping, so both are None; `ancestry`
+                # is the back-compatible "Unspecified" the harness expects.
+                "population": None,
+                "vcep_group": None,
+                "ancestry": "Unspecified",
                 "expected": tier,
                 "signals": signals,
                 "locus": {"chrom": chrom, "pos": int(pos), "ref": ref, "alt": alt,
                           "snv": is_snv, "missense": is_missense},
+                # job1 task 3: carry the ClinVar Allele ID so the allele-ID identity
+                # route can join even when a Variation ID match is unavailable.
                 "provenance": {"source": "ClinVar", "clnrevstat": revstat,
-                               "variation_id": vid},
-            })
+                               "variation_id": vid,
+                               "allele_id": (info.get("ALLELEID") or "").strip() or None},
+            }
+            # job1 task 4: MANE Select / RefSeq transcript identity, when the VCF
+            # carries it (optional INFO fields); absent -> None, never invented.
+            transcript = transcript_block(info, gene)
+            if transcript is not None:
+                case["transcript"] = transcript
+                with_transcript += 1
+            cases.append(case)
             counts["kept"] += 1
 
     benchmark = {
@@ -128,6 +161,13 @@ def main() -> None:
                  "enriched -- NOT the full ACMG evidence set. This benchmark exposes "
                  "the evidence-integration gap: pathogenic recall is expected to be "
                  "low because PVS1/PS3/PM3-type evidence is not encoded here."),
+        "field_semantics": {
+            "population": "True genetic-ancestry / population-stratification group "
+                          "(None: ClinVar carries no per-case ancestry).",
+            "vcep_group": "ClinGen VCEP / expert-panel grouping (None for ClinVar).",
+            "ancestry": "Back-compatible 'Unspecified' for the existing harness; "
+                        "prefer population (ancestry) and vcep_group (panel).",
+        },
         "source_file": "data/raw/clinvar_GRCh38.vcf.gz",
         "cases": cases,
     }
@@ -142,6 +182,7 @@ def main() -> None:
     print(f"Wrote {len(cases)} real ClinVar cases -> {OUT}")
     print(f"  with frequency signal:    {n_af}")
     print(f"  missense SNVs (REVEL-able): {n_mis}")
+    print(f"  with transcript identity:  {with_transcript}")
     print(f"  skipped (review status):  {counts['skip_revstat']}")
     print(f"  skipped (non-standard sig): {counts['skip_sig']}")
 

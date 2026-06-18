@@ -15,6 +15,8 @@ from fastapi import APIRouter, Depends
 
 from engine.scoring import classify
 
+from ..auth import UserContext
+from ..authz import require_permission
 from ..deps import get_resolver
 from ..evidence_resolver import EvidenceResolver
 from ..schemas import ClassifyRequest
@@ -26,6 +28,7 @@ router = APIRouter(tags=["classify"])
 @router.post("/classify")
 def classify_variant(
     req: ClassifyRequest,
+    user: UserContext = Depends(require_permission("classify:preview")),
     resolver: EvidenceResolver = Depends(get_resolver),
 ) -> Dict[str, Any]:
     events, provenance = resolve_evidence(

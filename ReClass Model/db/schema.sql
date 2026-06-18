@@ -73,6 +73,9 @@ CREATE TABLE IF NOT EXISTS clinical.classification (
     reconstruction_hash text NOT NULL,          -- SHA-256 over (evidence, engine_version)
     contributions       jsonb NOT NULL,         -- full per-criterion breakdown (auditable)
     overrides           jsonb NOT NULL DEFAULT '[]'::jsonb,
+    evidence            jsonb,                  -- resolved EvidenceBundle.to_dict() (transcript +
+                                                -- PS4 cohort counts + provenance); NULL when the
+                                                -- result was scored from direct events/signals
     signed_off_by       text,                   -- credentialed human; NULL until sign-off
     signed_off_at       timestamptz,
     created_at          timestamptz NOT NULL DEFAULT now()
@@ -113,7 +116,7 @@ CREATE TABLE IF NOT EXISTS clinical.reanalysis_event (
     new_tier                acmg_tier NOT NULL,
     old_points              numeric NOT NULL,
     new_points              numeric NOT NULL,
-    trigger                 text NOT NULL,    -- evidence | provider_version | config_version
+    trigger                 text NOT NULL,    -- evidence | source_snapshot | provider_version | config_version | conflict_policy
     crossed                 boolean NOT NULL, -- old_tier <> new_tier
     alert_id                uuid REFERENCES clinical.alert(alert_id),  -- set iff crossed
     created_at              timestamptz NOT NULL DEFAULT now(),
@@ -136,8 +139,9 @@ ALTER TABLE clinical.reanalysis_event
 -- --------------------------------------------------------------------------- --
 -- OPERATIONS: reanalysis work queue + run reports (gap §5)                     --
 -- --------------------------------------------------------------------------- --
--- A queue of (tenant, variant) work items that a provider-version / evidence /
--- config-version change has marked as needing reanalysis. Tenant-scoped + RLS-
+-- A queue of (tenant, variant) work items that a source-snapshot / provider-version /
+-- evidence / config-version / conflict-policy change has marked as needing reanalysis.
+-- Tenant-scoped + RLS-
 -- protected like the rest of clinical: a reanalysis touches a tenant's patient
 -- classifications, so the work item is tenant-owned. ``state`` drives the operational
 -- loop in ``ops/scheduler.py``; ``attempts`` + ``last_error`` back the retry/error
@@ -146,7 +150,7 @@ CREATE TABLE IF NOT EXISTS clinical.reanalysis_queue (
     queue_id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id     uuid NOT NULL REFERENCES clinical.tenant(tenant_id),
     variant_id    uuid NOT NULL REFERENCES clinical.variant(variant_id),
-    trigger       text NOT NULL,                 -- evidence | provider_version | config_version
+    trigger       text NOT NULL,                 -- evidence | source_snapshot | provider_version | config_version | conflict_policy
     reason        text,                          -- e.g. 'gnomAD 4.0 -> 4.1'
     state         text NOT NULL DEFAULT 'pending', -- pending|running|done|failed|skipped
     priority      integer NOT NULL DEFAULT 0,    -- higher runs first

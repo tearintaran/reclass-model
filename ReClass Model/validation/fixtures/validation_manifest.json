@@ -1,0 +1,20 @@
+{
+  "split": "validation",
+  "fixtures": [
+    {
+      "benchmark": "clingen_real_v1",
+      "path": "clingen_real_v1.json",
+      "purpose": "Expert-panel criteria reproduction benchmark."
+    },
+    {
+      "benchmark": "clinvar_real_v1",
+      "path": "clinvar_real_v1.json",
+      "purpose": "Sparse public-evidence ClinVar benchmark."
+    },
+    {
+      "benchmark": "clinvar_enriched_v1",
+      "path": "clinvar_enriched_v1.json",
+      "purpose": "ClinVar benchmark enriched with matched ClinGen-applied criteria."
+    }
+  ]
+}

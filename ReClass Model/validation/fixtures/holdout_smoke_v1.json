@@ -1,0 +1,36 @@
+{
+  "benchmark": "holdout_smoke_v1",
+  "fixture_split": "holdout",
+  "engine_version": "1.0.0",
+  "note": "Small reserved holdout fixture. Calibration and threshold tuning must reject it.",
+  "cases": [
+    {
+      "id": "HOLD-01",
+      "gene": "BRCA1",
+      "population": "European",
+      "vcep_group": null,
+      "ancestry": "European",
+      "disease": "Hereditary cancer",
+      "variant_class": "SNV",
+      "expected": "Pathogenic",
+      "signals": {
+        "criteria": [
+          {
+            "criterion": "PVS1",
+            "direction": "pathogenic",
+            "strength": "very_strong",
+            "source": "curated",
+            "version": "holdout-smoke"
+          },
+          {
+            "criterion": "PS1",
+            "direction": "pathogenic",
+            "strength": "strong",
+            "source": "curated",
+            "version": "holdout-smoke"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -37,6 +37,21 @@ def render_reviewer_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"- **{k}:** {_fmt(v)}")
     lines.append("")
 
+    strat = report.get("stratification")
+    if strat is not None:
+        lines.append("## Population / cohort stratification")
+        lines.append("")
+        lines.append("_True genetic ancestry and expert-panel grouping are distinct "
+                     "field families and are reported separately._")
+        lines.append("")
+        lines.append(f"- **Population (ancestry):** {_fmt(strat.get('population'))}")
+        lines.append(f"- **VCEP / expert-panel group:** {_fmt(strat.get('vcep_group'))}")
+        if strat.get("legacy_ancestry_is_panel"):
+            lines.append(f"  - _note: legacy `ancestry` value "
+                         f"`{_fmt(strat.get('legacy_ancestry'))}` is a panel name, "
+                         f"not an ancestry._")
+        lines.append("")
+
     lines.append("## Classification")
     lines.append("")
     lines.append(f"- **Tier:** {_fmt(clf.get('tier'))}")
@@ -91,6 +106,30 @@ def render_reviewer_markdown(report: Dict[str, Any]) -> str:
     lines.append("- **Warnings:** " + (", ".join(prov.get("warnings", [])) or "—"))
     lines.append(f"- **Source records:** {len(prov.get('source_records', []))}")
     lines.append("")
+
+    ext = report.get("evidence_extensions") or {}
+    tx = ext.get("transcript") or {}
+    cc = ext.get("cohort_counts") or {}
+    if tx or cc:
+        lines.append("## Transcript & cohort context")
+        lines.append("")
+        if tx:
+            lines.append(f"- **MANE Select transcript:** {_fmt(tx.get('mane_select'))}")
+            if tx.get("mane_plus_clinical"):
+                lines.append(f"- **MANE Plus Clinical:** {_fmt(tx.get('mane_plus_clinical'))}")
+            lines.append(f"- **RefSeq transcript:** {_fmt(tx.get('refseq'))}")
+            lines.append(f"- **Gene:** {_fmt(tx.get('gene'))}")
+            lines.append(f"- **HGVS c. / p.:** {_fmt(tx.get('hgvs_c'))} / {_fmt(tx.get('hgvs_p'))}")
+        if cc:
+            lines.append("- **PS4 cohort counts:** "
+                         f"cases {_fmt(cc.get('case_count'))}/{_fmt(cc.get('case_total'))}, "
+                         f"controls {_fmt(cc.get('control_count'))}/{_fmt(cc.get('control_total'))} "
+                         f"(denominator {_fmt(cc.get('denominator'))})")
+            if cc.get("odds_ratio") is not None:
+                lines.append(f"  - odds ratio {_fmt(cc.get('odds_ratio'))} "
+                             f"(95% CI {_fmt(cc.get('ci_low'))}–{_fmt(cc.get('ci_high'))}), "
+                             f"p {_fmt(cc.get('p_value'))}")
+        lines.append("")
 
     hist = report.get("history", {})
     lines.append("## History")

@@ -24,6 +24,9 @@ from engine.reference_cache import (
     file_sha256,
     load_default_reference,
     load_reference,
+    meta_path_for,
+    read_metadata,
+    record_metadata,
     reference_status,
 )
 from engine.reference import ReferenceLookupError
@@ -241,6 +244,72 @@ class TestCli(_EnvGuard):
         with redirect_stdout(buf):
             rc.main(["--status"])
         self.assertIn(path, buf.getvalue())
+
+
+class TestMetadataRecord(_EnvGuard):
+    """Recording the installed FASTA's source/version/checksum (job1 task 1)."""
+
+    def test_record_writes_sidecar_with_checksum(self):
+        path = os.path.join(self.dir, "GRCh38.fa")
+        _write_fasta(path)
+        meta = record_metadata(
+            ReferenceCacheConfig(path=path),
+            source="Ensembl", source_url="https://example/GRCh38.fa",
+            version="release-110", notes="test",
+        )
+        self.assertEqual(meta["sha256"], file_sha256(path))
+        self.assertEqual(meta["source"], "Ensembl")
+        self.assertEqual(meta["version"], "release-110")
+        self.assertEqual(meta["build"], "GRCh38")
+        self.assertTrue(meta["recorded_utc"])
+        # Round-trips through the sidecar file.
+        on_disk = read_metadata(meta_path_for(path))
+        self.assertEqual(on_disk["sha256"], meta["sha256"])
+
+    def test_record_raises_when_fasta_absent(self):
+        with self.assertRaises(ReferenceLookupError):
+            record_metadata(ReferenceCacheConfig(path=os.path.join(self.dir, "nope.fa")))
+
+    def test_status_surfaces_recorded_metadata_and_match(self):
+        path = os.path.join(self.dir, "GRCh38.fa")
+        _write_fasta(path)
+        record_metadata(ReferenceCacheConfig(path=path), source="Ensembl", version="r110")
+        status = reference_status(ReferenceCacheConfig(path=path))
+        self.assertEqual(status["metadata"]["source"], "Ensembl")
+        self.assertTrue(status["metadata_sha256_match"])
+
+    def test_status_metadata_mismatch_detected(self):
+        path = os.path.join(self.dir, "GRCh38.fa")
+        _write_fasta(path)
+        record_metadata(ReferenceCacheConfig(path=path), source="Ensembl")
+        # Tamper with the FASTA after recording -> recorded checksum no longer matches.
+        with open(path, "a") as f:
+            f.write("ACGT\n")
+        status = reference_status(ReferenceCacheConfig(path=path))
+        self.assertFalse(status["metadata_sha256_match"])
+
+    def test_status_no_metadata_is_clean(self):
+        path = os.path.join(self.dir, "GRCh38.fa")
+        _write_fasta(path)
+        status = reference_status(ReferenceCacheConfig(path=path))
+        self.assertIsNone(status["metadata"])
+        self.assertIsNone(status["metadata_sha256_match"])
+
+    def test_cli_record_then_status(self):
+        path = os.path.join(self.dir, "GRCh38.fa")
+        _write_fasta(path)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = rc.main(["--record", "--path", path, "--source", "Ensembl",
+                            "--source-version", "release-110"])
+        self.assertEqual(code, 0)
+        self.assertIn("Recorded provenance", buf.getvalue())
+        buf2 = io.StringIO()
+        with redirect_stdout(buf2):
+            rc.main(["--status", "--path", path])
+        out = buf2.getvalue()
+        self.assertIn("recorded source : Ensembl", out)
+        self.assertIn("meta matches    : yes", out)
 
 
 if __name__ == "__main__":

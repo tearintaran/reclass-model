@@ -27,7 +27,19 @@ import argparse
 import json
 import os
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from engine.scoring import classify_signals  # noqa: E402
+from engine import config as C  # noqa: E402
+from reporting.reviewer import build_validation_review_packet  # noqa: E402
+
+CLINICAL_RELEASE_STATE = "governance_reviewed_pending_credentialed_signoff"
+CLINICAL_RELEASE_STATEMENT = (
+    "Clinical-release state: governance_reviewed_pending_credentialed_signoff; "
+    "this report is not credentialed clinical sign-off."
+)
 
 # --------------------------------------------------------------------------- #
 # Tier model
@@ -233,6 +245,285 @@ def _criteria_summary(criteria):
     return parts
 
 
+def criteria_rows(criteria):
+    """Full supplied-criteria rows with source/version provenance."""
+    rows = []
+    for c in criteria or []:
+        rows.append({
+            "criterion": c.get("criterion", "?"),
+            "direction": c.get("direction") or _direction_from_name(c.get("criterion")),
+            "strength": c.get("strength"),
+            "source": c.get("source", "curated"),
+            "source_version": c.get("version") or c.get("source_version"),
+            "raw": c.get("raw", {}),
+        })
+    return rows
+
+
+def _direction_from_name(name):
+    name = str(name or "").upper()
+    if not name:
+        return None
+    return "pathogenic" if name[0] == "P" else "benign" if name[0] == "B" else None
+
+
+def _classification_detail(signals):
+    """Classify fixture signals once and expose contribution arithmetic."""
+    try:
+        cls = classify_signals(signals or {})
+    except Exception as exc:  # pragma: no cover - defensive reporting path
+        return {
+            "total_points": None,
+            "tier": None,
+            "contributions": [],
+            "overrides": [],
+            "reconstruction_hash": None,
+            "error": str(exc),
+        }
+    return {
+        "total_points": cls.total_points,
+        "tier": cls.tier,
+        "contributions": [
+            {
+                "criterion": c.acmg_criterion,
+                "direction": c.evidence_direction,
+                "strength": c.applied_strength,
+                "source": c.source,
+                "source_version": c.source_version,
+                "points": c.points,
+            }
+            for c in cls.contributions
+        ],
+        "overrides": list(cls.overrides),
+        "reconstruction_hash": cls.reconstruction_hash,
+        "error": None,
+    }
+
+
+def _has_standalone_benign(criteria):
+    return any(
+        str(c.get("criterion", "")).upper() == "BA1"
+        or str(c.get("strength", "")).lower() == "stand_alone"
+        for c in criteria or []
+        if _direction_is(c, "benign")
+    )
+
+
+def _has_opposing_evidence(expected, criteria):
+    if tier_rank(expected) >= tier_rank("Likely Pathogenic"):
+        return has_benign_criteria(criteria)
+    if tier_rank(expected) <= tier_rank("Likely Benign"):
+        return has_pathogenic_criteria(criteria)
+    return has_pathogenic_criteria(criteria) and has_benign_criteria(criteria)
+
+
+def _has_direction_evidence(expected, criteria):
+    if tier_rank(expected) >= tier_rank("Likely Pathogenic"):
+        return has_pathogenic_criteria(criteria)
+    if tier_rank(expected) <= tier_rank("Likely Benign"):
+        return has_benign_criteria(criteria)
+    return bool(criteria)
+
+
+def _label_disagreement_hint(fixture_case):
+    enrichment = (fixture_case or {}).get("enrichment") or {}
+    warnings = [str(w).lower() for w in enrichment.get("warnings") or []]
+    if enrichment.get("label_disagreement"):
+        return True
+    return any("label" in w and "disagree" in w for w in warnings)
+
+
+def _expected_tier_target(points, expected):
+    """Human-readable smallest score movement that enters the expected tier band."""
+    try:
+        p = float(points)
+    except (TypeError, ValueError):
+        return {"delta": None, "text": "score delta unavailable"}
+    if expected == "Pathogenic":
+        delta = max(0.0, 10.0 - p)
+        return {"delta": delta, "text": "increase net score to at least +10"}
+    if expected == "Likely Pathogenic":
+        if p < 6.0:
+            return {"delta": 6.0 - p, "text": "increase net score to at least +6"}
+        if p >= 10.0:
+            return {"delta": 10.0 - p, "text": "decrease net score below +10"}
+        return {"delta": 0.0, "text": "score already falls in the LP point band"}
+    if expected == "VUS":
+        if p < 0.0:
+            return {"delta": -p, "text": "increase net score to at least 0"}
+        if p >= 6.0:
+            return {"delta": 6.0 - p, "text": "decrease net score below +6"}
+        return {"delta": 0.0, "text": "score already falls in the VUS point band"}
+    if expected == "Likely Benign":
+        if p >= 0.0:
+            return {"delta": -p, "text": "decrease net score below 0"}
+        if p < -6.0:
+            return {"delta": -6.0 - p, "text": "increase net score to at least -6"}
+        return {"delta": 0.0, "text": "score already falls in the LB point band"}
+    if expected == "Benign":
+        delta = min(0.0, -6.0 - p)
+        return {"delta": delta, "text": "decrease net score below -6 or justify BA1"}
+    return {"delta": None, "text": "unknown expected tier"}
+
+
+def _is_threshold_edge(points, expected):
+    target = _expected_tier_target(points, expected)
+    delta = target.get("delta")
+    return isinstance(delta, (int, float)) and 0.0 < abs(delta) <= 1.0
+
+
+def _configured_override_hint(result_case, fixture_case):
+    """Best-effort signal that a scoped config override may be missing from scoring."""
+    try:
+        matches = C.BASE_CONFIG.matching_overrides(
+            gene=(result_case or {}).get("gene") or (fixture_case or {}).get("gene"),
+            vcep=(result_case or {}).get("ancestry") or (fixture_case or {}).get("vcep_group"),
+            variant_key=(fixture_case or {}).get("variant_key"),
+        )
+    except Exception:
+        matches = []
+    return [m.get("id", "unnamed") for m in matches]
+
+
+def classify_failure_cause(result_case, fixture_case, classification_detail=None):
+    """Classify a serious discordance into one stable root-cause category.
+
+    Categories are intentionally review-facing, not mutually exclusive biology:
+    the first applicable primary cause is returned so reports can be counted.
+    """
+    fixture_case = fixture_case or {}
+    criteria = _criteria(fixture_case)
+    expected = (result_case or {}).get("expected")
+    points = (result_case or {}).get("points")
+    cls = classification_detail or _classification_detail(_signals(fixture_case))
+    override_ids = _configured_override_hint(result_case, fixture_case)
+
+    if _label_disagreement_hint(fixture_case):
+        return "reference-label disagreement"
+    if cls.get("overrides") and _has_opposing_evidence(expected, criteria):
+        return "conflict-policy issue"
+    if _has_standalone_benign(criteria) and tier_rank(expected) >= tier_rank("Likely Pathogenic"):
+        return "conflict-policy issue"
+    if override_ids and _has_opposing_evidence(expected, criteria):
+        return "override absence"
+    if not _has_direction_evidence(expected, criteria):
+        return "evidence absence"
+    if _is_threshold_edge(points, expected):
+        return "threshold edge"
+    return "strength mismatch"
+
+
+def candidate_change_for_cause(cause, result_case, fixture_case):
+    """Smallest reviewable change that could resolve a serious discordance."""
+    fixture_case = fixture_case or {}
+    expected = (result_case or {}).get("expected")
+    points = (result_case or {}).get("points")
+    target = _expected_tier_target(points, expected)
+    delta = target.get("delta")
+    delta_text = ""
+    if isinstance(delta, (int, float)) and abs(delta) > 0:
+        delta_text = " (smallest model-level point move: {:+.1f})".format(delta)
+
+    if cause == "evidence absence":
+        return {
+            "candidate_change": (
+                "Add or restore validated direction-appropriate ACMG evidence; "
+                f"{target['text']}{delta_text}."
+            ),
+            "candidate_type": "data",
+        }
+    if cause == "strength mismatch":
+        return {
+            "candidate_change": (
+                "Review supplied criterion strengths and opposing criteria against the source record; "
+                f"{target['text']}{delta_text} if the reference label is retained."
+            ),
+            "candidate_type": "human review",
+        }
+    if cause == "threshold edge":
+        return {
+            "candidate_change": (
+                "Prepare a threshold/config proposal only if credentialed review decides this "
+                f"near-boundary case should move; {target['text']}{delta_text}."
+            ),
+            "candidate_type": "config proposal",
+        }
+    if cause == "override absence":
+        return {
+            "candidate_change": (
+                "Add or activate a scoped VCEP/gene/variant override only after credentialed review "
+                "records the exact scope and source."
+            ),
+            "candidate_type": "config proposal",
+        }
+    if cause == "conflict-policy issue":
+        return {
+            "candidate_change": (
+                "Adjudicate the pathogenic-vs-benign evidence conflict; if accepted, record a "
+                "variant-specific data correction or config proposal rather than changing scoring "
+                "globally."
+            ),
+            "candidate_type": "human review",
+        }
+    if cause == "reference-label disagreement":
+        return {
+            "candidate_change": (
+                "Resolve the reference-label disagreement with a credentialed adjudication packet; "
+                "do not treat either source as silently authoritative."
+            ),
+            "candidate_type": "human review",
+        }
+    return {
+        "candidate_change": "Review the source evidence packet and decide whether the issue is data, code, or scope.",
+        "candidate_type": "human review",
+    }
+
+
+def _reviewer_disposition(result_case, fixture_case):
+    """Return a recorded reviewer disposition from report or fixture metadata."""
+    for source in (result_case or {}, fixture_case or {}):
+        for key in ("adjudication", "review", "reviewer_decision"):
+            block = source.get(key) or {}
+            if not isinstance(block, dict):
+                continue
+            disposition = (
+                block.get("reviewer_disposition")
+                or block.get("disposition")
+                or block.get("decision")
+            )
+            if disposition not in (None, ""):
+                return disposition
+    return None
+
+
+def adjudication_record(failure_cause, candidate, result_case, fixture_case):
+    """Machine-readable serious-discordance adjudication state."""
+    disposition = _reviewer_disposition(result_case, fixture_case)
+    unresolved = disposition in (None, "", "pending", "unresolved")
+    return {
+        "root_cause_category": failure_cause,
+        "proposed_remediation": candidate["candidate_change"],
+        "reviewer_disposition": disposition,
+        "release_blocking": bool(unresolved),
+        "release_blocking_reason": (
+            "Unresolved pathogenic-vs-benign discordance requires reviewer disposition."
+            if unresolved
+            else None
+        ),
+    }
+
+
+def _packet_classification(case, cls_detail):
+    return {
+        "tier": cls_detail.get("tier"),
+        "total_points": cls_detail.get("total_points"),
+        "engine_version": C.ENGINE_VERSION,
+        "reconstruction_hash": cls_detail.get("reconstruction_hash"),
+        "overrides": list(cls_detail.get("overrides") or []),
+        "variant_key": (case or {}).get("variant_key"),
+    }
+
+
 def analyze(report, fixture, benchmark=None):
     """Build the full structured analysis from a report dict and fixture dict.
 
@@ -260,6 +551,8 @@ def analyze(report, fixture, benchmark=None):
     by_evidence_serious = Counter()
     signal_counts = Counter()  # 'REVEL', 'gnomAD AF', 'neither'
     serious_split = Counter()  # 'serious' / 'non_serious'
+    by_failure_cause = Counter()
+    release_blocking_serious = 0
 
     # gap key -> aggregate
     gaps = {}
@@ -356,27 +649,68 @@ def analyze(report, fixture, benchmark=None):
 
     # Serious-error detail blocks ------------------------------------------- #
     serious_details = []
+    review_packets = []
     for c in serious_cases:
         fc = fixture_by_id.get(c["id"])
         provenance = (fc or {}).get("provenance")
         criteria = _criteria(fc)
-        serious_details.append(
-            {
-                "id": c["id"],
-                "gene": c.get("gene"),
-                "group": c.get("ancestry"),
-                "expected": c.get("expected"),
-                "predicted": c.get("predicted"),
-                "points": c.get("points"),
-                "criteria": _criteria_summary(criteria),
-                "signals": {
-                    k: v
-                    for k, v in _signals(fc).items()
-                    if k in ("revel", "gnomad_af")
+        signals = _signals(fc)
+        cls_detail = _classification_detail(signals)
+        failure_cause = classify_failure_cause(c, fc, cls_detail)
+        candidate = candidate_change_for_cause(failure_cause, c, fc)
+        adjudication = adjudication_record(failure_cause, candidate, c, fc)
+        if adjudication["release_blocking"]:
+            release_blocking_serious += 1
+        by_failure_cause[failure_cause] += 1
+        detail = {
+            "id": c["id"],
+            "gene": c.get("gene"),
+            "group": c.get("ancestry"),
+            "expected": c.get("expected"),
+            "predicted": c.get("predicted"),
+            "points": c.get("points"),
+            "criteria": _criteria_summary(criteria),
+            "criteria_rows": criteria_rows(criteria),
+            "point_contributions": cls_detail["contributions"],
+            "classification_overrides": cls_detail["overrides"],
+            "classification_error": cls_detail["error"],
+            "reconstructed_tier": cls_detail["tier"],
+            "reconstructed_total_points": cls_detail["total_points"],
+            "reconstruction_hash": cls_detail["reconstruction_hash"],
+            "failure_cause": failure_cause,
+            "candidate_change": candidate["candidate_change"],
+            "candidate_type": candidate["candidate_type"],
+            "root_cause_category": adjudication["root_cause_category"],
+            "proposed_remediation": adjudication["proposed_remediation"],
+            "reviewer_disposition": adjudication["reviewer_disposition"],
+            "release_blocking": adjudication["release_blocking"],
+            "adjudication": adjudication,
+            "signals": {
+                k: v
+                for k, v in _signals(fc).items()
+                if k in ("revel", "gnomad_af")
+            },
+            "provenance": provenance,
+            "provenance_link": _provenance_link(provenance),
+        }
+        serious_details.append(detail)
+        review_packets.append(
+            build_validation_review_packet(
+                benchmark=benchmark or report.get("benchmark"),
+                case=fc or {"id": c.get("id"), "gene": c.get("gene"), "expected": c.get("expected")},
+                result=c,
+                classification=_packet_classification(fc, cls_detail),
+                root_cause_category=adjudication["root_cause_category"],
+                proposed_remediation=adjudication["proposed_remediation"],
+                review_decision={
+                    "status": "recorded" if adjudication["reviewer_disposition"] else "pending",
+                    "reviewer_disposition": adjudication["reviewer_disposition"],
                 },
-                "provenance": provenance,
-                "provenance_link": _provenance_link(provenance),
-            }
+                override_proposal={
+                    "proposed": candidate["candidate_type"] == "config proposal",
+                    "status": "pending" if candidate["candidate_type"] == "config proposal" else "not_proposed",
+                },
+            )
         )
 
     def _counter_to_rows(counter, serious_counter, key_name):
@@ -428,10 +762,18 @@ def analyze(report, fixture, benchmark=None):
                 for cat, n in by_evidence.most_common()
             ],
             "serious_vs_nonserious": dict(serious_split),
+            "serious_by_failure_cause": [
+                {"failure_cause": cause, "count": count}
+                for cause, count in by_failure_cause.most_common()
+            ],
+            "release_blocking_serious": release_blocking_serious,
         },
         "gaps": ranked_gaps,
         "evidence_recommendations": recommend_evidence_sources(mismatch_evidence),
         "serious_errors": serious_details,
+        "review_packets": review_packets,
+        "clinical_release_state": CLINICAL_RELEASE_STATE,
+        "clinical_release_statement": CLINICAL_RELEASE_STATEMENT,
     }
     return analysis
 
@@ -462,6 +804,8 @@ def render_markdown(analysis):
       % (a.get("engine_version"), a.get("run_utc"),
          "PASS" if a.get("gate_pass") else "FAIL"))
     w("")
+    w("**%s**" % a.get("clinical_release_statement", CLINICAL_RELEASE_STATEMENT))
+    w("")
 
     # Headline ------------------------------------------------------------- #
     w("## Headline")
@@ -471,6 +815,7 @@ def render_markdown(analysis):
     w("| Cases scored | %s |" % m.get("n", t["report_cases"]))
     w("| Mismatches (`match==false`) | %d |" % t["mismatches"])
     w("| Serious errors (`serious==true`) | %d |" % t["serious"])
+    w("| Release-blocking serious errors | %d |" % a["rollups"].get("release_blocking_serious", 0))
     if "definitive_concordance" in m:
         w("| Concordance on definitive calls | %s |"
           % _pct(m.get("definitive_concordance")))
@@ -568,6 +913,25 @@ def render_markdown(analysis):
       % (ss.get("serious", 0), ss.get("non_serious", 0)))
     w("")
 
+    w("### Serious-discordance root causes")
+    w("")
+    causes = a["rollups"].get("serious_by_failure_cause", [])
+    if causes:
+        w("| Failure cause | Serious cases |")
+        w("|---|---:|")
+        for row in causes:
+            w("| %s | %d |" % (row["failure_cause"], row["count"]))
+    else:
+        w("_No serious discordances._")
+    w("")
+
+    w("## Engineering fixes vs clinical sign-off")
+    w("")
+    w("- Engineering/data work may prepare evidence packets, matching fixes, and config proposals.")
+    w("- Clinical sign-off decisions remain separate and must be made by credentialed reviewers.")
+    w("- This report proposes candidate changes; it does not approve thresholds, overrides, or labels.")
+    w("")
+
     # Serious detail blocks ------------------------------------------------- #
     w("## Serious errors (%d) -- detail" % len(a["serious_errors"]))
     w("")
@@ -576,10 +940,71 @@ def render_markdown(analysis):
     for d in a["serious_errors"]:
         w("### %s -- %s (%s)" % (d["id"], d["gene"], d.get("group") or "--"))
         w("")
-        w("- Expected **%s** -> predicted **%s**  (points: %s)"
-          % (d["expected"], d["predicted"], d["points"]))
-        w("- Supplied criteria: %s"
-          % (", ".join(d["criteria"]) if d["criteria"] else "_none_"))
+        w("| Field | Value |")
+        w("|---|---|")
+        w("| Case ID | %s |" % d["id"])
+        w("| Gene | %s |" % d["gene"])
+        w("| Expected tier | %s |" % d["expected"])
+        w("| Predicted tier | %s |" % d["predicted"])
+        w("| Total points | %s |" % d["points"])
+        w("| Reconstructed tier | %s |" % d.get("reconstructed_tier"))
+        w("| Reconstruction hash | `%s` |" % (d.get("reconstruction_hash") or "--"))
+        w("")
+
+        w("#### Supplied criteria and source versions")
+        w("")
+        if d.get("criteria_rows"):
+            w("| Criterion | Direction | Strength | Source | Source version |")
+            w("|---|---|---|---|---|")
+            for row in d["criteria_rows"]:
+                w("| %s | %s | %s | %s | %s |" % (
+                    row.get("criterion"),
+                    row.get("direction") or "--",
+                    row.get("strength") or "--",
+                    row.get("source") or "--",
+                    row.get("source_version") or "--",
+                ))
+        else:
+            w("_No supplied ACMG criteria._")
+        w("")
+
+        w("#### Point-contribution table")
+        w("")
+        if d.get("classification_error"):
+            w("_Could not reconstruct contribution table: %s._" % d["classification_error"])
+        elif d.get("point_contributions"):
+            w("| Criterion | Direction | Strength | Source | Source version | Points |")
+            w("|---|---|---|---|---|---:|")
+            for row in d["point_contributions"]:
+                w("| %s | %s | %s | %s | %s | %s |" % (
+                    row.get("criterion"),
+                    row.get("direction") or "--",
+                    row.get("strength") or "--",
+                    row.get("source") or "--",
+                    row.get("source_version") or "--",
+                    row.get("points"),
+                ))
+        else:
+            w("_No point-contributing evidence._")
+        if d.get("classification_overrides"):
+            w("")
+            w("Classification overrides:")
+            for ov in d["classification_overrides"]:
+                w("- %s" % ov)
+        w("")
+
+        w("#### Root-cause classification and candidate resolution")
+        w("")
+        w("| Failure cause | Candidate change | Candidate type | Reviewer disposition | Release blocking |")
+        w("|---|---|---|---|---|")
+        w("| %s | %s | %s | %s | %s |" % (
+            d.get("failure_cause"),
+            d.get("candidate_change"),
+            d.get("candidate_type"),
+            d.get("reviewer_disposition") or "--",
+            "yes" if d.get("release_blocking") else "no",
+        ))
+        w("")
         if d["signals"]:
             w("- Signals: %s"
               % ", ".join("%s=%s" % (k, v) for k, v in d["signals"].items()))
@@ -621,9 +1046,15 @@ def render_stdout_summary(analysis):
         lines.append("")
         lines.append("Serious errors:")
         for d in a["serious_errors"]:
-            lines.append("  - %s %s: %s -> %s (pts=%s)"
+            lines.append("  - %s %s: %s -> %s (pts=%s; cause=%s)"
                          % (d["id"], d["gene"], d["expected"],
-                            d["predicted"], d["points"]))
+                            d["predicted"], d["points"], d.get("failure_cause")))
+        causes = a["rollups"].get("serious_by_failure_cause", [])
+        if causes:
+            lines.append("")
+            lines.append("Serious root-cause breakdown:")
+            for row in causes:
+                lines.append("  - %s: %d" % (row["failure_cause"], row["count"]))
     return "\n".join(lines)
 
 

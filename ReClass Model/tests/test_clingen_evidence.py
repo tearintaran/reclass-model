@@ -271,13 +271,121 @@ class TestCanonicalFallback(unittest.TestCase):
         ref = InMemoryReference({"1": "GAAAAT"})
         cg = _cg_case_locus("CG-INDEL", "Pathogenic",
                             [_crit("PM2", "pathogenic", "moderate")], "1", 1, "G", "GA")
-        prov = ClinGenEvidenceProvider(ClinGenIndex.from_cases([cg]), reference=ref)
+        prov = ClinGenEvidenceProvider(ClinGenIndex.from_cases([cg], reference=ref),
+                                       reference=ref)
         case = {"expected": "Pathogenic", "provenance": {"variation_id": "-"},
                 "locus": {"chrom": "1", "pos": 5, "ref": "A", "alt": "AA"}}
         bundle = prov.fetch(case)
         self.assertEqual(bundle.match["match_type"], "canonical_key")
+        self.assertEqual(bundle.match["route"], "reference_backed_indel")
         self.assertEqual(bundle.match["normalization_method"], "reference_left_aligned")
         self.assertEqual(bundle.match["canonical_key"], "GRCh38-1-1-G-GA")
+
+
+# --------------------------------------------------------------------------- #
+# job1: HGVS-genomic (hgvs_g) fallback tier + strict priority + ambiguity      #
+# --------------------------------------------------------------------------- #
+def _cg_case_hgvs(case_id, expected, criteria, grch38_hgvs, clinvar_id="-"):
+    """A ClinGen record with NO locus block, only a genomic HGVS token (indel)."""
+    case = _cg_case(case_id, clinvar_id, expected, criteria)
+    case["provenance"]["grch38_hgvs"] = grch38_hgvs
+    return case
+
+
+# NC_000001.11 (GRCh38 chr1) == contig "1" = G A A A A T over positions 1..6.
+REF_CHR1 = InMemoryReference({"1": "GAAAAT"})
+
+
+class TestHgvsGenomicFallback(unittest.TestCase):
+    def test_indel_recovered_from_genomic_hgvs(self):
+        # ClinGen carries only a genomic deletion HGVS; the index resolves it against
+        # the reference so a ClinVar indel with the same coordinates matches (hgvs_g).
+        cg = _cg_case_hgvs("CG-G", "Pathogenic",
+                           [_crit("PVS1", "pathogenic", "very_strong")],
+                           "NC_000001.11:g.2del")
+        prov = ClinGenEvidenceProvider(
+            ClinGenIndex.from_cases([cg], reference=REF_CHR1), reference=REF_CHR1)
+        # g.2del == VCF 1-1-GA-G; a repeat-shifted ClinVar spelling (delete an A from
+        # the AAAA run at pos2) left-aligns to the same key and still matches.
+        case = {"expected": "Pathogenic", "provenance": {"variation_id": "999"},
+                "locus": {"chrom": "1", "pos": 2, "ref": "AA", "alt": "A"}}
+        bundle = prov.fetch(case)
+        self.assertEqual(bundle.match["match_type"], "canonical_key")
+        self.assertEqual(bundle.match["route"], "hgvs_g")
+        self.assertEqual(bundle.match["canonical_key"], "GRCh38-1-1-GA-G")
+        self.assertEqual([e.acmg_criterion for e in bundle.events], ["PVS1"])
+        self.assertEqual(bundle.match["clingen_case_id"], "CG-G")
+
+    def test_hgvs_g_needs_a_reference(self):
+        # Without a reference the genomic indel token cannot be resolved -> no key,
+        # so the case is an honest miss, never a guess.
+        cg = _cg_case_hgvs("CG-G", "Pathogenic",
+                           [_crit("PVS1", "pathogenic", "very_strong")],
+                           "NC_000001.11:g.2del")
+        prov = ClinGenEvidenceProvider(ClinGenIndex.from_cases([cg]))  # no reference
+        self.assertEqual(prov.index.canonical_keys, set())
+        case = {"expected": "Pathogenic", "provenance": {"variation_id": "999"},
+                "locus": {"chrom": "1", "pos": 1, "ref": "GA", "alt": "G"}}
+        bundle = prov.fetch(case)
+        self.assertEqual(bundle.match["match_type"], "none")
+
+    def test_variation_id_wins_over_hgvs_g(self):
+        # A record reachable by BOTH a Variation ID and a coordinate must take the
+        # stronger Variation ID route -- a weaker route never overrides it.
+        cg = _cg_case_hgvs("CG-G", "Pathogenic",
+                           [_crit("PVS1", "pathogenic", "very_strong")],
+                           "NC_000001.11:g.2del", clinvar_id="555")
+        prov = ClinGenEvidenceProvider(
+            ClinGenIndex.from_cases([cg], reference=REF_CHR1), reference=REF_CHR1)
+        case = {"expected": "Pathogenic", "provenance": {"variation_id": "555"},
+                "locus": {"chrom": "1", "pos": 1, "ref": "GA", "alt": "G"}}
+        bundle = prov.fetch(case)
+        self.assertEqual(bundle.match["match_type"], "variation_id")
+        self.assertEqual(bundle.match["route"], "variation_id")
+
+
+class TestFallbackAmbiguity(unittest.TestCase):
+    def _two_records_at_one_key(self, criteria_a, criteria_b):
+        cg_a = _cg_case_locus("CG-A", "Pathogenic", criteria_a, "1", 100, "A", "G")
+        cg_b = _cg_case_locus("CG-B", "VUS", criteria_b, "1", 100, "A", "G")
+        return ClinGenEvidenceProvider(ClinGenIndex.from_cases([cg_a, cg_b]))
+
+    def test_conflicting_criteria_is_ambiguous_and_imports_nothing(self):
+        prov = self._two_records_at_one_key(
+            [_crit("PVS1", "pathogenic", "very_strong")],
+            [_crit("BA1", "benign", "stand_alone")],
+        )
+        case = {"expected": "Pathogenic", "provenance": {"variation_id": "999"},
+                "locus": {"chrom": "1", "pos": 100, "ref": "A", "alt": "G", "snv": True}}
+        bundle = prov.fetch(case)
+        self.assertTrue(bundle.match["ambiguous"])
+        self.assertEqual(bundle.events, [])  # missing evidence stays unknown
+        self.assertIn("ambiguous_fallback_match", bundle.warnings)
+        # Raw match detail preserved for debugging.
+        self.assertEqual(bundle.match["candidate_count"], 2)
+        self.assertEqual(bundle.match["candidate_ids"], ["CG-A", "CG-B"])
+
+    def test_equivalent_criteria_enriches_from_either(self):
+        # Two records, same imported criteria -> deterministically equivalent -> enrich.
+        prov = self._two_records_at_one_key(
+            [_crit("PM2", "pathogenic", "moderate")],
+            [_crit("PM2", "pathogenic", "moderate")],
+        )
+        case = {"expected": "Pathogenic", "provenance": {"variation_id": "999"},
+                "locus": {"chrom": "1", "pos": 100, "ref": "A", "alt": "G", "snv": True}}
+        bundle = prov.fetch(case)
+        self.assertFalse(bundle.match["ambiguous"])
+        self.assertEqual([e.acmg_criterion for e in bundle.events], ["PM2"])
+        self.assertIn("multiple_clingen_matches", bundle.warnings)
+
+    def test_variation_id_multiple_records_is_not_ambiguous(self):
+        # The ambiguity rule applies to FALLBACK routes only; the Variation ID join
+        # keeps its deterministic duplicate-resolution policy and still enriches.
+        prov = ClinGenEvidenceProvider(ClinGenIndex.from_cases(CASES))
+        bundle = prov.fetch({"expected": "Pathogenic", "provenance": {"variation_id": "100"}})
+        self.assertFalse(bundle.match["ambiguous"])
+        self.assertEqual(bundle.match["route"], "variation_id")
+        self.assertTrue(bundle.events)
 
 
 if __name__ == "__main__":

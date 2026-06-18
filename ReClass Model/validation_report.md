@@ -18,25 +18,27 @@ Run from `ReClass Model/`:
 
 | Benchmark | Cases | Gate | Definitive concordance | Serious discordance | Overall exact concordance | Meaning |
 |---|---:|---|---:|---:|---:|---|
-| `synthetic_v1` | 25 | PASS | 90.5% | 0 cases | 92.0% | Harness/scoring plumbing works |
+| `synthetic_v1` | 32 | PASS | 92.9% | 0 cases | 93.8% | Harness/scoring plumbing works |
 | `clingen_real_v1` | 12,446 | PASS | 94.7% | 4 cases | 93.0% | Complete expert-applied criteria reproduce VCEP calls well |
 | `clinvar_real_v1` | 21,638 | FAIL | 5.0% | 34 cases | 19.9% | Partial ClinVar evidence exposes the evidence-integration gap |
-| `clinvar_enriched_v1` | 21,638 | FAIL | 37.8% | 9 cases | 43.3% | Direct ClinGen criteria matches improve ClinVar but do not solve missing evidence |
+| `clinvar_enriched_v1` | 21,638 | FAIL | 42.4% | 6 cases | 46.6% | Direct and fallback ClinGen criteria matches improve ClinVar but do not solve missing evidence |
 
 ## Raw ClinVar vs enriched ClinVar
 
 `clinvar_enriched_v1` preserves ClinVar expected labels but adds ClinGen ERepo
-criteria for direct ClinVar Variation ID matches.
+criteria for direct ClinVar Variation ID matches, canonical SNV-key fallback
+matches, and genomic-HGVS fallback matches when source identity fields are
+available.
 
 | Measure | Raw ClinVar | Enriched ClinVar | Change |
 |---|---:|---:|---:|
 | Cases | 21,638 | 21,638 | 0 |
-| Cases with structured criteria | 0 | 10,649 | +10,649 |
-| Definitive concordance | 5.0% | 37.8% | +32.8 percentage points |
-| Overall exact concordance | 19.9% | 43.3% | +23.5 percentage points |
-| Serious discordance count | 34 | 9 | -25 |
-| Improved cases | n/a | 6,147 | n/a |
-| Worsened cases | n/a | 894 | n/a |
+| Cases with structured criteria | 0 | 11,970 | +11,970 |
+| Definitive concordance | 5.0% | 42.4% | +37.4 percentage points |
+| Overall exact concordance | 19.9% | 46.6% | +26.7 percentage points |
+| Serious discordance count | 34 | 6 | -28 |
+| Improved cases | n/a | 6,993 | n/a |
+| Worsened cases | n/a | 1,023 | n/a |
 
 The comparison report is:
 
@@ -56,10 +58,12 @@ ClinVar calls need additional evidence such as PVS1, PS3, PM3, PS2/PM6, PP1, PP4
 and PS4.
 
 The enriched ClinVar benchmark proves that structured evidence recovery helps:
-direct ClinGen matches add 33,094 criteria across 10,649 cases, raise definitive
-concordance substantially, and reduce serious errors. It still fails because 10,989
-cases remain unmatched and many variants still lack the evidence expert reviewers
-use.
+direct ClinGen Variation ID matches plus canonical SNV key matches (940) and
+genomic-HGVS matches (381) add 37,873 criteria across 11,970 cases, raise
+definitive concordance substantially (Pathogenic recall 0% to 32.1%, Likely
+Pathogenic recall 0% to 55.9%), and reduce serious errors.
+It still fails because 9,668 cases remain unmatched and many variants still lack the
+evidence expert reviewers use; evidence completeness is the blocker.
 
 ## Generated reports
 
@@ -84,8 +88,9 @@ tools.
 
 - Separate true ancestry stratification from VCEP/group stratification in the
   fixture schema and reports.
-- Add more reference-backed indel and canonical-key match-rate reporting once a
-  production GRCh38 FASTA and upstream source loci are available.
+- Keep reference-backed indel and canonical-key match-rate reporting current as
+  source snapshots change; the current reference-backed indel lift is 0 on this
+  real fixture.
 - Expand calibration reports as more VCEP/gene/disease-specific rule specs are
   locally reviewed and adopted.
 - Rank remaining evidence-provider work beyond ClinGen/REVEL/gnomAD by expected

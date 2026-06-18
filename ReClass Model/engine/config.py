@@ -47,10 +47,10 @@ def points_to_tier(points: float) -> str:
 
 
 # REVEL -> PP3 (pathogenic). Evaluated highest threshold first.
-REVEL_PP3: List[Tuple[float, str]] = [tuple(b) for b in BASE_CONFIG.revel_pp3]
+REVEL_PP3: List[Tuple[float, str]] = [(float(b[0]), str(b[1])) for b in BASE_CONFIG.revel_pp3]
 
 # REVEL -> BP4 (benign). Evaluated lowest threshold first.
-REVEL_BP4: List[Tuple[float, str]] = [tuple(b) for b in BASE_CONFIG.revel_bp4]
+REVEL_BP4: List[Tuple[float, str]] = [(float(b[0]), str(b[1])) for b in BASE_CONFIG.revel_bp4]
 
 # gnomAD popmax allele-frequency cutoffs.
 BA1_AF = BASE_CONFIG.ba1_af      # >= 5%   -> BA1 stand-alone benign

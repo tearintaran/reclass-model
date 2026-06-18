@@ -468,6 +468,87 @@ class TestRunIO(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Locked real-data regression baselines
+# --------------------------------------------------------------------------- #
+
+
+class TestLockedRegressionBaselines(unittest.TestCase):
+    CLINGEN = os.path.join(REPORTS_DIR, "validation_report_clingen_real_v1.json")
+    CLINVAR_RAW = os.path.join(REPORTS_DIR, "validation_report_clinvar_real_v1.json")
+    CLINVAR_ENRICHED = os.path.join(REPORTS_DIR, "validation_report_clinvar_enriched_v1.json")
+    RAW_VS_ENRICHED = os.path.join(
+        REPORTS_DIR,
+        "comparison_clinvar_real_v1_vs_clinvar_enriched_v1.json",
+    )
+
+    PINNED_SERIOUS_IDS = {
+        "clingen_real_v1": ["CG-17004", "CG-17010", "CG-43555", "CG-9212"],
+        "clinvar_real_v1": [
+            "CV-2733822", "CV-1406866", "CV-1170692", "CV-254652",
+            "CV-281140", "CV-533979", "CV-636389", "CV-447426",
+            "CV-407115", "CV-2163", "CV-4056348", "CV-100281",
+            "CV-17023", "CV-136199", "CV-232594", "CV-239906",
+            "CV-234571", "CV-234554", "CV-428619", "CV-55432",
+            "CV-54758", "CV-266331", "CV-225393", "CV-1210182",
+            "CV-996171", "CV-952995", "CV-2506415", "CV-1691490",
+            "CV-690393", "CV-432062", "CV-403662", "CV-4540582",
+            "CV-866825", "CV-98738",
+        ],
+        "clinvar_enriched_v1": [
+            "CV-43555", "CV-17010", "CV-17004", "CV-55432",
+            "CV-54758", "CV-266331",
+        ],
+    }
+
+    def _serious_ids(self, path):
+        report = CR._load_json(path)
+        return [case["id"] for case in report["cases"] if case.get("serious")]
+
+    def test_serious_discordance_ids_are_pinned(self):
+        self.assertEqual(
+            self._serious_ids(self.CLINGEN),
+            self.PINNED_SERIOUS_IDS["clingen_real_v1"],
+        )
+        self.assertEqual(
+            self._serious_ids(self.CLINVAR_RAW),
+            self.PINNED_SERIOUS_IDS["clinvar_real_v1"],
+        )
+        self.assertEqual(
+            self._serious_ids(self.CLINVAR_ENRICHED),
+            self.PINNED_SERIOUS_IDS["clinvar_enriched_v1"],
+        )
+
+    def test_raw_vs_enriched_clinvar_deltas_are_pinned(self):
+        comparison = CR._load_json(self.RAW_VS_ENRICHED)
+        metrics = comparison["metrics"]
+        self.assertEqual(metrics["case_count"]["delta"], 0)
+        self.assertEqual(metrics["serious_count"]["delta"], -28)
+        self.assertAlmostEqual(metrics["definitive_concordance"]["delta"], 0.3741435471189487)
+        self.assertAlmostEqual(metrics["overall_concordance"]["delta"], 0.2674923745262963)
+
+        coverage = comparison["evidence_coverage"]["delta"]
+        self.assertEqual(coverage["with_criteria"]["delta"], 11970)
+        self.assertEqual(coverage["with_enrichment"]["delta"], 21638)
+        self.assertEqual(coverage["criteria_buckets"]["0"]["delta"], -11970)
+        self.assertEqual(coverage["criteria_buckets"]["5+"]["delta"], 2134)
+
+    def test_matched_vs_unmatched_concordance_is_pinned(self):
+        enriched = CR._load_json(self.CLINVAR_ENRICHED)
+        matched = enriched["metrics"]["matched_unmatched"]["matched"]
+        unmatched = enriched["metrics"]["matched_unmatched"]["unmatched"]
+
+        self.assertEqual(matched["n"], 11970)
+        self.assertAlmostEqual(matched["concordance"], 0.7795321637426901)
+        self.assertAlmostEqual(matched["definitive_concordance"], 0.8389000354065856)
+        self.assertEqual(matched["serious"], 3)
+
+        self.assertEqual(unmatched["n"], 9668)
+        self.assertAlmostEqual(unmatched["concordance"], 0.07819611088125776)
+        self.assertAlmostEqual(unmatched["definitive_concordance"], 0.04778742097932069)
+        self.assertEqual(unmatched["serious"], 3)
+
+
+# --------------------------------------------------------------------------- #
 # Optional smoke check against real reports
 # --------------------------------------------------------------------------- #
 

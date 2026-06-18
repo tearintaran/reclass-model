@@ -7,9 +7,47 @@ located/validated by `engine.reference_cache`.
 ## Do not commit large FASTA files
 
 Whole-genome FASTA files are multi-gigabyte. They must **not** be committed to
-source control. Treat everything here except this README as a local-only cache.
+source control. Treat the FASTA/`.fai` here as a local-only cache.
 
-A `.gitignore` policy should exclude `*.fa`, `*.fasta`, and `*.fai` in this folder.
+The repo `.gitignore` excludes `*.fa`, `*.fasta`, `*.fai` (and everything else in
+this folder) **except** the small, tracked provenance/tooling files:
+
+- `README.md` (this file),
+- `install_grch38.sh` — the install helper,
+- `GRCh38.source.json` — the pinned source/version manifest,
+- `GRCh38.fa.meta.json` — the recorded source/version/**checksum** of the genome
+  you actually installed (written by `engine.reference_cache --record`).
+
+So the genome build stays fully auditable in-repo *without* committing the genome.
+
+## Quick install (recommended)
+
+From the `ReClass Model/` directory:
+
+```bash
+bash data/reference/install_grch38.sh
+```
+
+This downloads the pinned source (see `GRCh38.source.json`), writes
+`data/reference/GRCh38.fa`, builds a `.fai` if `samtools` is present, and records
+the installed file's source, version, and SHA-256 into `GRCh38.fa.meta.json`.
+Override the source with `GRCH38_URL` / `GRCH38_SOURCE` / `GRCH38_VERSION` env vars.
+
+## Recording the source, version, and checksum
+
+If you install the FASTA by hand, record its provenance afterwards so the build is
+reproducible and tamper-evident:
+
+```bash
+../.venv/bin/python -m engine.reference_cache --record \
+  --source "Ensembl GRCh38 primary assembly" \
+  --source-version "Ensembl release-110" \
+  --source-url "https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz"
+```
+
+`--record` computes the SHA-256 of the file on disk and writes `GRCh38.fa.meta.json`.
+`--status` then reports the recorded source/version/checksum and re-verifies the
+file still matches the recorded digest (`meta matches : yes`).
 
 ## Expected default filename
 

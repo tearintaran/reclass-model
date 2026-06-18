@@ -16,6 +16,7 @@ Run explicitly:
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 import unittest
@@ -26,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MAINTENANCE_DB = os.environ.get("RECLASS_MAINTENANCE_DB", "postgres")
 
 # Pure-logic imports (no DB driver needed) -> the PS4 tests always run.
-from engine.scoring import EvidenceEvent, classify  # noqa: E402
+from engine.scoring import EvidenceEvent  # noqa: E402
 from monitoring import reanalysis as rean  # noqa: E402
 
 
@@ -65,28 +66,43 @@ class TestCohortPS4(unittest.TestCase):
             rean.cohort_to_ps4_event([{"case_count": 25, "control_count": 25}])
         )
 
-    def test_vcep_proband_count_override_lowers_threshold(self):
-        # The generic default needs >=5 enriched cases; the ClinGen Cardiomyopathy
-        # Expert Panel proband-count spec (Kelly et al. 2018) fires PS4_Supporting at
-        # >=2 probands (PM2 supplied separately) even with no control cohort.
+    def test_hearing_loss_proband_count_override_lowers_threshold(self):
+        # The generic default needs >=5 enriched cases; the current ClinGen Hearing
+        # Loss VCEP proband-count spec fires PS4_Supporting at >=2 unrelated probands
+        # (PM2 supplied separately) even with no control cohort.
         counts = [{"case_count": 3, "control_count": 0}]
         self.assertIsNone(rean.cohort_to_ps4_event(counts))  # default needs 5
-        ev = rean.cohort_to_ps4_event(counts, gene="MYH7")
-        self.assertIsNotNone(ev, "MYH7 VCEP override fires at >= 2 probands")
+        ev = rean.cohort_to_ps4_event(counts, gene="COCH")
+        self.assertIsNotNone(ev, "COCH Hearing Loss override fires at >= 2 probands")
         self.assertEqual(ev.applied_strength, "supporting")
 
-    def test_vcep_proband_count_strength_bands(self):
-        # >=2 supporting, >=6 moderate, >=15 strong (Cardiomyopathy/Hearing Loss VCEP).
+    def test_hearing_loss_proband_count_strength_bands(self):
+        # >=2 supporting, >=6 moderate, >=15 strong (Hearing Loss VCEP).
         def strength(n, gene):
             ev = rean.cohort_to_ps4_event(
                 [{"case_count": n, "control_count": 0}], gene=gene
             )
             return ev.applied_strength if ev else None
 
-        self.assertIsNone(strength(1, "MYBPC3"))            # below proband floor
-        self.assertEqual(strength(2, "MYBPC3"), "supporting")
-        self.assertEqual(strength(6, "GJB2"), "moderate")   # hearing-loss gene
-        self.assertEqual(strength(15, "TNNT2"), "strong")
+        self.assertIsNone(strength(1, "COCH"))            # below proband floor
+        self.assertEqual(strength(2, "COCH"), "supporting")
+        self.assertEqual(strength(6, "KCNQ4"), "moderate")
+        self.assertEqual(strength(15, "MYO6"), "strong")
+
+    def test_cardiomyopathy_bare_proband_counts_yield_nothing(self):
+        # Current Cardiomyopathy CSpecs require an odds-ratio CI, so a cardiomyopathy
+        # gene reported only as a bare proband count (no denominators) gets no PS4 --
+        # the historical simple proband-count shortcut must not fire for MYH7.
+        counts = [{"case_count": 3, "control_count": 0}]
+        self.assertIsNone(rean.cohort_to_ps4_event(counts, gene="MYH7"))
+        # An OR rule is what governs the gene now (not the case-control default).
+        self.assertIsInstance(rean.resolve_ps4_rule(gene="MYH7"), rean.PS4OddsRatioRule)
+
+    def test_recessive_hearing_loss_gene_uses_default(self):
+        # The current Hearing Loss proband-count PS4 text is autosomal-dominant
+        # specific, so recessive GJB2 does not get the gene-wide shortcut.
+        counts = [{"case_count": 3, "control_count": 0}]
+        self.assertIsNone(rean.cohort_to_ps4_event(counts, gene="GJB2"))
 
     def test_unknown_gene_uses_conservative_default(self):
         # A gene with no VCEP rule falls back to the case-control default.
@@ -108,6 +124,86 @@ class TestCohortPS4(unittest.TestCase):
         out = rean.events_with_cohort_ps4(base, rich_counts)
         self.assertEqual(len(out), 2)
         self.assertEqual(out[-1].acmg_criterion, "PS4")
+
+
+class TestOddsRatioCI(unittest.TestCase):
+    """Pure case-control odds-ratio + 95% CI math (cardiomyopathy PS4, A4)."""
+
+    def test_odds_ratio_and_wald_ci(self):
+        # 2x2 = [[10, 90], [1, 99]] -> OR = (10*99)/(90*1) = 11.0; no empty cell, so
+        # no continuity correction. CI is the standard Wald log-OR interval.
+        odds, lo, hi = rean.odds_ratio_ci(10, 90, 1, 99)
+        self.assertAlmostEqual(odds, 11.0, places=6)
+        self.assertAlmostEqual(lo, 1.3805, places=3)
+        self.assertAlmostEqual(hi, 87.66, places=1)
+        self.assertLess(lo, odds)
+        self.assertLess(odds, hi)
+
+    def test_haldane_correction_keeps_or_finite_with_zero_cell(self):
+        # A zero variant-control cell would divide by zero without the +0.5 fix.
+        odds, lo, hi = rean.odds_ratio_ci(5, 95, 0, 100)
+        self.assertTrue(math.isfinite(odds) and math.isfinite(lo) and math.isfinite(hi))
+        self.assertGreater(odds, 1.0)
+        self.assertLess(lo, odds)
+
+    def test_ci_lower_to_strength_bins(self):
+        rule = rean.CARDIOMYOPATHY_OR_RULE
+        self.assertEqual(rean._ps4_or_strength(7.2, rule), "strong")     # >= 5.0
+        self.assertEqual(rean._ps4_or_strength(3.6, rule), "moderate")   # >= 3.0
+        self.assertEqual(rean._ps4_or_strength(1.8, rule), "supporting") # >= 1.5
+        self.assertIsNone(rean._ps4_or_strength(1.2, rule))              # > floor, < bins
+        self.assertIsNone(rean._ps4_or_strength(0.9, rule))              # includes OR=1
+
+
+class TestCardiomyopathyOddsRatioPS4(unittest.TestCase):
+    """End-to-end PS4 from case-control denominators for cardiomyopathy genes (A4)."""
+
+    def test_strong_enrichment_with_denominators_fires_ps4(self):
+        # 30/5000 cases vs 2/10000 controls -> OR ~30, CI lower ~7 -> PS4_Strong.
+        counts = [{"case_count": 30, "control_count": 2,
+                   "case_total": 5000, "control_total": 10000}]
+        ev = rean.cohort_to_ps4_event(counts, gene="MYH7")
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.acmg_criterion, "PS4")
+        self.assertEqual(ev.applied_strength, "strong")
+        self.assertEqual(ev.raw["mode"], "odds_ratio")
+        self.assertGreater(ev.raw["odds_ratio"], 5.0)
+        self.assertGreater(ev.raw["ci_lower"], 5.0)
+        self.assertEqual(ev.raw["total_cases"], 5000)
+
+    def test_non_significant_enrichment_yields_no_event(self):
+        # 5/1000 vs 8/2000 -> OR ~1.25, CI lower < 1 -> no PS4 (interval includes 1).
+        counts = [{"case_count": 5, "control_count": 8,
+                   "case_total": 1000, "control_total": 2000}]
+        self.assertIsNone(rean.cohort_to_ps4_event(counts, gene="MYBPC3"))
+
+    def test_min_variant_cases_gate(self):
+        # Hugely enriched but only 3 variant-positive cases (< min_variant_cases=4).
+        counts = [{"case_count": 3, "control_count": 0,
+                   "case_total": 10, "control_total": 100000}]
+        self.assertIsNone(rean.cohort_to_ps4_event(counts, gene="TNNT2"))
+
+    def test_denominators_summed_across_ancestries(self):
+        counts = [
+            {"case_count": 18, "control_count": 1, "case_total": 3000, "control_total": 6000},
+            {"case_count": 14, "control_count": 1, "case_total": 2000, "control_total": 4000},
+        ]
+        ev = rean.cohort_to_ps4_event(counts, gene="ACTC1")
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.raw["variant_cases"], 32)
+        self.assertEqual(ev.raw["total_controls"], 10000)
+        self.assertIn(ev.applied_strength, {"supporting", "moderate", "strong"})
+
+    def test_explicit_rule_can_drive_a_crossing(self):
+        # The OR-derived PS4 sums into the engine exactly like any other event.
+        base = [EvidenceEvent(source="curated", acmg_criterion="PM2",
+                              evidence_direction="pathogenic", applied_strength="moderate")]
+        counts = [{"case_count": 30, "control_count": 2,
+                   "case_total": 5000, "control_total": 10000}]
+        out = rean.events_with_cohort_ps4(base, counts, gene="MYL2")
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[-1].acmg_criterion, "PS4")
+        self.assertEqual(out[-1].applied_strength, "strong")
 
 
 # --------------------------------------------------------------------------- #

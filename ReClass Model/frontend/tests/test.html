@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReClass Reviewer — Tests</title>
+  <!--
+    ReClass reviewer frontend test harness (dependency-free).
+
+    HOW TO RUN
+    ----------
+    1. In a browser: open this file directly (File ▸ Open) or serve the
+       `frontend/` directory and visit `tests/test.html`. Results render on the
+       page and are also logged to the developer console. A green banner = pass.
+
+    2. Headless (CI / quick check), using only system Chrome — no npm install:
+
+         CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+         "$CHROME" --headless=new --disable-gpu --no-sandbox \
+           --virtual-time-budget=8000 --dump-dom \
+           "file://$(pwd)/frontend/tests/test.html" | grep RECLASS-TEST-RESULT
+
+       Exit/parse on the `RECLASS-TEST-RESULT pass=true ...` marker line.
+
+    The harness mocks `fetch` (via ReClass.setFetch) with inline fixtures that
+    mirror the real API response shapes, so it needs no running backend. It loads
+    the real ../app.js and drives the actual handlers + renderers.
+  -->
+  <style>
+    body { font-family: ui-monospace, monospace; background: #0f1419; color: #e7ecf3; padding: 1rem; }
+    #result { padding: 0.75rem 1rem; border-radius: 6px; font-weight: 700; margin-bottom: 1rem; }
+    #result.pass { background: rgba(127,217,98,0.15); border: 1px solid #7fd962; color: #7fd962; }
+    #result.fail { background: rgba(240,113,120,0.15); border: 1px solid #f07178; color: #f07178; }
+    .case { padding: 0.15rem 0; font-size: 0.85rem; }
+    .case.ok::before { content: "✓ "; color: #7fd962; }
+    .case.bad::before { content: "✗ "; color: #f07178; }
+    .case.bad { color: #f07178; }
+    #sandbox { position: absolute; left: -9999px; top: -9999px; }
+  </style>
+</head>
+<body>
+  <h1>ReClass Reviewer — Tests</h1>
+  <div id="result">Running…</div>
+  <div id="cases"></div>
+
+  <!-- Hidden DOM the handlers render into. -->
+  <div id="sandbox"></div>
+
+  <!-- Skip auto-init; the harness drives ReClass explicitly. -->
+  <script>window.__RECLASS_TEST__ = true;</script>
+  <script src="../app.js"></script>
+  <script>
+  (async function () {
+    const R = window.ReClass;
+    const results = [];
+    function assert(name, cond) {
+      results.push({ name, ok: !!cond });
+      const div = document.createElement("div");
+      div.className = "case " + (cond ? "ok" : "bad");
+      div.textContent = name;
+      document.getElementById("cases").appendChild(div);
+      // eslint-disable-next-line no-console
+      console.log((cond ? "PASS" : "FAIL") + " — " + name);
+    }
+    const txt = (n) => (n ? n.textContent : "");
+
+    // ---- Sandbox DOM matching the ids the handlers reference -------------- //
+    function buildSandbox() {
+      const ids = [
+        "api-base", "tenant-id", "bearer-token", "session-status", "token-hint",
+        "chrom", "pos", "ref", "alt", "build", "patient-mrn",
+        "provider-panel", "evidence-region", "evidence-raw",
+        "classification-region", "classification-raw", "warnings-region",
+        "reviewer-region", "reviewer-raw", "signoff-release", "signoff-status",
+        "signer", "credential", "draft-region", "alert-region",
+      ];
+      const box = document.getElementById("sandbox");
+      box.innerHTML = "";
+      const inputs = { "chrom": "1", "pos": "100", "ref": "A", "alt": "G", "build": "GRCh38" };
+      ids.forEach((id) => {
+        const isInput = ["api-base", "tenant-id", "bearer-token", "chrom", "pos",
+          "ref", "alt", "build", "patient-mrn", "signer", "credential"].includes(id);
+        const node = document.createElement(isInput ? "input" : "div");
+        node.id = id;
+        if (id in inputs) node.value = inputs[id];
+        box.appendChild(node);
+      });
+    }
+
+    // ---- Fixtures (mirror real API shapes) ------------------------------- //
+    const F = {
+      providers: {
+        providers: [
+          { name: "clingen", version: "ClinGen-2024" },
+          { name: "gnomad", version: "gnomad_r4" },
+          { name: "revel", version: "REVEL_v1.3" },
+        ],
+      },
+      resolve: {
+        variant_key: "GRCh38-1-100-A-G",
+        events: [
+          { source: "revel", acmg_criterion: "PP3", evidence_direction: "pathogenic",
+            applied_strength: "supporting", points: null, source_version: "REVEL", raw: { revel_score: 0.8 } },
+          { source: "gnomad", acmg_criterion: "PM2", evidence_direction: "pathogenic",
+            applied_strength: "supporting", points: null, source_version: "gnomAD", raw: { popmax_af: 0.0 } },
+        ],
+        provider_versions: { revel: "REVEL", gnomad: "gnomAD", clingen: "ClinGen-2024" },
+        source_records: [], warnings: ["gnomad:low_coverage"], match: {},
+        per_provider: { revel: {}, gnomad: {}, clingen: {} },
+      },
+      resolveEmpty: {
+        variant_key: "GRCh38-1-100-A-G", events: [],
+        provider_versions: {}, source_records: [],
+        warnings: ["no_evidence_resolved"], match: {}, per_provider: {},
+      },
+      classification: {
+        classification: {
+          tier: "VUS", total_points: 1.0,
+          contributions: [{ source: "revel", acmg_criterion: "PP3", evidence_direction: "pathogenic",
+            applied_strength: "supporting", points: 1.0, source_version: "REVEL" }],
+          overrides: [], engine_version: "engine_v1", reconstruction_hash: "abc123",
+        },
+        engine_version: "engine_v1", reconstruction_hash: "abc123", warnings: [],
+        provider_versions: { revel: "REVEL" }, evidence: null, evidence_by_provider: {},
+        is_draft: true, signed_off_by: null,
+      },
+      draftReceipt: {
+        classification_id: "cid-1", variant_key: "GRCh38-1-100-A-G", tier: "VUS",
+        total_points: 1.0, signed_off_by: null, signed_off_at: null, is_draft: true,
+        created_at: "2026-06-16T00:00:00Z", contributions: [], overrides: [],
+      },
+      signedReceipt: {
+        classification_id: "cid-1", variant_key: "GRCh38-1-100-A-G", tier: "VUS",
+        total_points: 1.0, signed_off_by: "Dr. Reviewer, MD", signed_off_at: "2026-06-16T01:00:00Z",
+        is_draft: false, contributions: [], overrides: [],
+      },
+      reviewer: {
+        report_type: "technical_reviewer", generated_utc: "2026-06-16T00:00:00Z",
+        release_status: { is_draft: true, status: "DRAFT — not for clinical use", signed_off_by: null, signed_off_at: null },
+        identity: { variant_key: "GRCh38-1-100-A-G", variant_id: "GRCh38-1-100-A-G" },
+        classification: { classification_id: "cid-1", tier: "VUS", total_points: 1.0,
+          engine_version: "engine_v1", reconstruction_hash: "abc123", overrides: [] },
+        evidence_by_source: { revel: [{ source: "revel", acmg_criterion: "PP3",
+          evidence_direction: "pathogenic", applied_strength: "supporting", points: 1.0, source_version: "REVEL", raw: {} }] },
+        criteria: [{ criterion: "PP3", direction: "pathogenic", strength: "supporting",
+          points: 1.0, source: "revel", source_version: "REVEL", provenance: {}, warnings: [] }],
+        evidence_provenance: { provider_versions: { revel: "REVEL" }, source_records: [], match: null, warnings: [] },
+        history: { previous_classifications: [{ classification_id: "cid-0", tier: "Likely Benign",
+          total_points: -2, signed_off_by: null, created_at: "2026-06-01T00:00:00Z" }],
+          reanalysis_events: [], alerts: [] },
+        audit: { same_tier_changes: [], tier_crossings: [], note: "n/a" },
+        source_versions: { revel: "REVEL" }, warnings: ["check_source"],
+        limitations: ["Automated decision support only."],
+      },
+      summary: {
+        report_type: "patient_summary", release_status: { is_draft: true, signed_off_by: null },
+        identity: { variant_key: "GRCh38-1-100-A-G" },
+        result: { classification: "VUS", plain_language: "This variant is of uncertain significance." },
+        what_this_means: "A classification summarizes current evidence.",
+        next_steps: "Discuss with your provider.", limitations: ["Decision support only."],
+      },
+      list: [
+        { classification_id: "cid-1", variant_key: "GRCh38-1-100-A-G", tier: "VUS", is_draft: true },
+        { classification_id: "cid-9", variant_key: "GRCh38-2-200-C-T", tier: "Pathogenic", is_draft: false },
+      ],
+      alerts: [
+        { alert_id: "a1", variant_key: "GRCh38-1-100-A-G", old_tier: "VUS",
+          new_tier: "Likely Pathogenic", serious: true, state: "open" },
+      ],
+    };
+
+    function jsonResp(body) {
+      return { ok: true, status: 200, statusText: "OK", text: async () => JSON.stringify(body) };
+    }
+    function textResp(s) {
+      return { ok: true, status: 200, statusText: "OK", text: async () => s };
+    }
+    // Router mock: dispatches on path/method like the real API.
+    function mockFetch(url, opts = {}) {
+      const method = (opts.method || "GET").toUpperCase();
+      const p = String(url);
+      if (p.includes("/evidence/providers")) return Promise.resolve(jsonResp(F.providers));
+      if (p.includes("/evidence/resolve")) return Promise.resolve(jsonResp(F.resolve));
+      if (p.includes("/classify")) return Promise.resolve(jsonResp(F.classification));
+      if (p.endsWith("/classifications") && method === "POST")
+        return Promise.resolve(jsonResp({ ...F.classification, receipt: F.draftReceipt, is_draft: true }));
+      if (p.endsWith("/classifications") && method === "GET")
+        return Promise.resolve(jsonResp(F.list));
+      if (p.includes("/sign-off")) return Promise.resolve(jsonResp(F.signedReceipt));
+      if (p.includes("/report/reviewer") && p.includes("markdown")) return Promise.resolve(textResp("# Reviewer report\n\n- PP3"));
+      if (p.includes("/report/reviewer")) return Promise.resolve(jsonResp(F.reviewer));
+      if (p.includes("/report/summary")) return Promise.resolve(jsonResp(F.summary));
+      if (p.includes("/alerts")) return Promise.resolve(jsonResp(F.alerts));
+      return Promise.resolve(jsonResp(null));
+    }
+
+    function resetState() {
+      Object.assign(R.state, {
+        apiBase: "http://mock", tenantId: "t-1", bearerToken: "secret",
+        providers: null, discoveredProviders: [], providerCatalog: [],
+        resolvedEvents: [], resolvedWarnings: [], resolvedBundle: null,
+        classificationId: null,
+      });
+    }
+
+    try {
+      // === 1. Production-safe token handling ============================== //
+      assert("DEV_PERSIST_TOKEN defaults to false (token not persisted)", R.DEV_PERSIST_TOKEN === false);
+      resetState();
+      const persisted = R.persistableSession();
+      assert("persistableSession() omits the bearer token", !("bearerToken" in persisted));
+      assert("persistableSession() keeps apiBase + tenantId", persisted.apiBase === "http://mock" && persisted.tenantId === "t-1");
+
+      // === 2. Provider discovery (no hardcoded list) ===================== //
+      const discovered = R.discoverProviders(F.resolve);
+      assert("discoverProviders finds all sources from the response", JSON.stringify(discovered) === JSON.stringify(["clingen", "gnomad", "revel"]));
+      assert("discovery is not the legacy hardcoded ['revel','gnomad']", discovered.length === 3 && discovered.includes("clingen"));
+      assert("discoverProviders([]) handles empty input", R.discoverProviders(null).length === 0);
+
+      // === 2b. Provider catalog from GET /evidence/providers (wiring) ===== //
+      resetState();
+      R.setFetch(mockFetch);
+      buildSandbox();
+      const catalog = await R.loadProviders();
+      assert("loadProviders fetches the configured catalog", catalog.length === 3 && catalog.every((p) => p.name && p.version));
+      assert("loadProviders populates discoveredProviders before any resolve",
+        JSON.stringify(R.state.discoveredProviders) === JSON.stringify(["clingen", "gnomad", "revel"]));
+      assert("provider panel shows configured providers + versions pre-resolve",
+        txt($("provider-panel")).includes("clingen") && txt($("provider-panel")).includes("REVEL_v1.3"));
+      assert("discoverProviders unions the catalog with resolve hits",
+        R.discoverProviders(F.resolveEmpty).includes("clingen"));
+      // Graceful degradation: endpoint unreachable -> empty catalog, no throw.
+      resetState();
+      R.setFetch(() => Promise.reject(new Error("network down")));
+      buildSandbox();
+      const fallback = await R.loadProviders();
+      assert("loadProviders degrades gracefully when endpoint is unreachable", fallback.length === 0);
+      assert("fallback still discovers providers from a later resolve",
+        R.discoverProviders(F.resolve).includes("revel"));
+
+      // === 3. Region states ============================================== //
+      const reg = document.createElement("div");
+      R.setRegionLoading(reg, "Loading…");
+      assert("loading state shows a spinner", reg.dataset.state === "loading" && reg.querySelector(".spinner"));
+      R.setRegionError(reg, "boom");
+      assert("error state shows the message", reg.dataset.state === "error" && txt(reg.querySelector(".region-msg")) === "boom");
+      R.setRegionEmpty(reg, "nothing here");
+      assert("empty state shows the empty message", reg.dataset.state === "empty" && txt(reg).includes("nothing here"));
+
+      // === 4. Evidence bundle renderer =================================== //
+      const ev = document.createElement("div");
+      R.renderEvidenceEvents(ev, F.resolve.events);
+      assert("evidence table renders", !!ev.querySelector(".evidence-table table"));
+      assert("evidence table has a row per event", ev.querySelectorAll(".evidence-table tbody tr").length === 2);
+      assert("evidence row shows provider + criterion + version", txt(ev).includes("revel") && txt(ev).includes("PP3") && txt(ev).includes("REVEL"));
+      const evEmpty = document.createElement("div");
+      R.renderEvidenceEvents(evEmpty, []);
+      assert("evidence empty state when no events", evEmpty.dataset.state === "empty");
+
+      // === 5. Contributions renderer ===================================== //
+      const con = document.createElement("div");
+      R.renderContributions(con, F.classification.classification.contributions, 1.0, ["BA1 stand-alone rule"]);
+      assert("contributions table renders", !!con.querySelector(".contrib-table table"));
+      assert("contributions show total points", txt(con.querySelector(".total-points")).includes("1"));
+      assert("overrides are surfaced", txt(con).includes("BA1 stand-alone rule"));
+
+      // === 6. Sign-off / release state (never present draft as final) ==== //
+      const draftReg = document.createElement("div");
+      R.renderReleaseStatus(draftReg, F.draftReceipt);
+      assert("draft receipt shows DRAFT badge", !!draftReg.querySelector(".release-badge.draft") && txt(draftReg).includes("DRAFT"));
+      const signedReg = document.createElement("div");
+      R.renderReleaseStatus(signedReg, F.signedReceipt);
+      assert("signed receipt shows SIGNED OFF badge", !!signedReg.querySelector(".release-badge.signed") && txt(signedReg).includes("SIGNED OFF"));
+      assert("draft is never labelled signed", !draftReg.querySelector(".release-badge.signed"));
+
+      // === 7. Warnings renderer ========================================== //
+      const w = document.createElement("div");
+      R.renderWarnings(w, ["a:warn", "b:warn"]);
+      assert("warnings list renders both warnings", w.querySelectorAll(".warnings-list .warning-item").length === 2);
+      const wEmpty = document.createElement("div");
+      R.renderWarnings(wEmpty, []);
+      assert("warnings empty state when none", wEmpty.dataset.state === "empty");
+
+      // === 8. Reviewer report (structured, not raw JSON) ================= //
+      const rep = document.createElement("div");
+      R.renderReviewerReport(rep, F.reviewer);
+      assert("reviewer report has a title", txt(rep.querySelector(".report-title")) === "Technical reviewer report");
+      assert("reviewer report shows draft release state", !!rep.querySelector(".release-badge.draft"));
+      assert("reviewer report renders the criteria table", !!rep.querySelector(".contrib-table table"));
+      assert("reviewer report renders evidence by source", !!rep.querySelector(".evidence-by-source"));
+      assert("reviewer report renders history with prior classification", !!rep.querySelector(".history-section") && txt(rep).includes("Likely Benign"));
+      assert("reviewer report renders warnings + limitations", txt(rep).includes("check_source") && txt(rep).includes("Automated decision support only."));
+
+      // === 9. Patient summary ============================================ //
+      const sum = document.createElement("div");
+      R.renderPatientSummary(sum, F.summary);
+      assert("patient summary shows tier + plain language", !!sum.querySelector(".tier-badge") && txt(sum).includes("uncertain significance"));
+
+      // === 10. Full workflow through mocked fetch ======================== //
+      buildSandbox();
+      R.setFetch(mockFetch);
+      resetState();
+
+      await R.resolveEvidence();
+      assert("workflow: resolve renders evidence table", !!document.getElementById("evidence-region").querySelector(".evidence-table"));
+      assert("workflow: provider panel populated from response", document.querySelectorAll("#provider-panel input[type=checkbox]").length === 3);
+      assert("workflow: warnings region populated", !!document.getElementById("warnings-region").querySelector(".warnings-list"));
+      assert("workflow: resolved events stored in state", R.state.resolvedEvents.length === 2);
+
+      await R.classifyPreview();
+      assert("workflow: classify shows tier badge", !!document.getElementById("classification-region").querySelector(".tier-badge"));
+      assert("workflow: classify shows contributions", !!document.getElementById("classification-region").querySelector(".contrib-table"));
+      assert("workflow: classify marks preview as draft-only", txt(document.getElementById("classification-region")).includes("Preview only"));
+
+      await R.persistDraft();
+      assert("workflow: persist stores classification id", R.state.classificationId === "cid-1");
+      assert("workflow: persist shows draft release badge", !!document.getElementById("signoff-release").querySelector(".release-badge.draft"));
+
+      await R.loadReviewerReport("json");
+      assert("workflow: reviewer report renders in region", !!document.getElementById("reviewer-region").querySelector(".report-title"));
+
+      await R.loadReviewerReport("markdown");
+      assert("workflow: markdown report renders as text", txt(document.getElementById("reviewer-region")).includes("Reviewer report"));
+
+      document.getElementById("signer").value = "Dr. Reviewer, MD";
+      await R.signOff();
+      assert("workflow: sign-off flips release to SIGNED OFF", !!document.getElementById("signoff-release").querySelector(".release-badge.signed"));
+
+      await R.listDrafts();
+      assert("workflow: drafts list shows only drafts", document.getElementById("draft-region").querySelectorAll(".draft-row").length === 1);
+
+      await R.listAlerts();
+      assert("workflow: alerts render as cards", !!document.getElementById("alert-region").querySelector(".alert-card"));
+
+      // === 11. Error state (unreachable API) ============================= //
+      buildSandbox();
+      R.setFetch(() => Promise.reject(new Error("network down")));
+      await R.runAction(document.getElementById("evidence-region"), R.resolveEvidence);
+      assert("error state: unreachable API renders an error", document.getElementById("evidence-region").dataset.state === "error");
+
+      // === 12. Empty states ============================================== //
+      buildSandbox();
+      R.setFetch((url, opts) => {
+        const p = String(url); const m = (opts && opts.method || "GET").toUpperCase();
+        if (p.includes("/evidence/resolve")) return Promise.resolve(jsonResp(F.resolveEmpty));
+        if (p.endsWith("/classifications") && m === "GET") return Promise.resolve(jsonResp([]));
+        if (p.includes("/alerts")) return Promise.resolve(jsonResp([]));
+        return Promise.resolve(jsonResp(null));
+      });
+      resetState();
+      await R.resolveEvidence();
+      assert("empty state: no events -> evidence region empty", document.getElementById("evidence-region").dataset.state === "empty");
+      await R.listDrafts();
+      assert("empty state: no drafts -> draft region empty", document.getElementById("draft-region").dataset.state === "empty");
+      await R.listAlerts();
+      assert("empty state: no alerts -> alert region empty", document.getElementById("alert-region").dataset.state === "empty");
+    } catch (e) {
+      assert("harness ran without throwing: " + (e && e.message), false);
+      // eslint-disable-next-line no-console
+      console.error(e);
+    }
+
+    // ---- Summary --------------------------------------------------------- //
+    const failed = results.filter((r) => !r.ok).length;
+    const total = results.length;
+    const pass = failed === 0;
+    const banner = document.getElementById("result");
+    banner.className = pass ? "pass" : "fail";
+    banner.textContent = `${pass ? "PASS" : "FAIL"} — ${total - failed}/${total} checks passed`;
+    const marker = `RECLASS-TEST-RESULT pass=${pass} total=${total} failed=${failed}`;
+    banner.setAttribute("data-marker", marker);
+    // eslint-disable-next-line no-console
+    console.log(marker);
+  })();
+  </script>
+</body>
+</html>

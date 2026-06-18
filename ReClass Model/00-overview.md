@@ -14,17 +14,36 @@ Orient contributors to the current local project:
 
 - What the system is: a deterministic ACMG/AMP variant reclassification engine.
 - What currently works: scoring, normalization, reference providers,
-  reference-cache status, evidence bundles, ClinGen/REVEL/gnomAD providers,
-  canonical identity, versioned config, monitoring diff, reanalysis helpers,
-  operational scheduling, API/reporting/sign-off service workflows, validation,
-  calibration/comparison reporting, diagnostic plots, real fixtures, ingest
-  scripts, database schema, storage adapters, governance docs, and
-  PostgreSQL/RLS tests.
+  reference-cache status (the GRCh38 FASTA is now installed locally), evidence
+  bundles, ClinGen/REVEL/gnomAD/AlphaMissense/computational providers plus the
+  extended PVS1/PS3/BS3/PM3/PP1/PP4/splice/CNV/non-coding/complex-indel/
+  mitochondrial/repeat/SV criteria layer, canonical identity, versioned
+  config, monitoring diff, reanalysis helpers, operational scheduling,
+  API/reporting/sign-off service workflows, the reviewer frontend (mounted at
+  `/reviewer/`), proof-of-concept API auth/authz/audit/observability, a
+  containerized deployment surface, an operator CLI (`cli.py`), validation,
+  calibration/comparison reporting, the single-command analytical-validation report,
+  per-case serious-discordance drill-downs, diagnostic plots, real fixtures, ingest
+  scripts, database schema, storage adapters, governance docs, and PostgreSQL/RLS
+  tests.
+- What was most recently completed: upstream-evidence adapters (de novo, phasing,
+  segregation, phenotype, functional, disease-mechanism, case-control); byte-stable
+  cache manifests; the full identity-route set (Variation ID, Allele ID, canonical
+  key, SPDI, MANE/HGVS transcript, genomic HGVS) with ambiguity accounting; MANE
+  transcript identity and PS4 denominator/cohort counts in the evidence model;
+  development/validation/holdout fixture splits with an anti-leakage guardrail;
+  reviewer review packets; serious-discordance adjudication; configurable
+  conflict-policy checks; scoped validation gates; locked regression baselines; a
+  pinned/drift-checked OpenAPI contract with runnable cookbook examples; FHIR
+  amended-report state transitions with replayable payloads; change-control
+  reanalysis triggers with an auditable run manifest; startup preflight checks; and
+  an expanded GitHub Actions CI pipeline.
 - What "validated" means here: validation gates report concordance and serious
   pathogenic/benign discordance for a named fixture and engine version.
-- What remains: production deployment, local clinical validation/sign-off,
-  optional clinician-facing UI, a supplied GRCh38 FASTA for production indel
-  normalization, and broader evidence-provider coverage.
+- What remains: credentialed clinical sign-off and a formal clinical
+  validation study, data licensing for clinical use, production identity-provider
+  rollout plus deployment hardening, live LIS/EHR integration, and real-world
+  evidence population/calibration for the structured providers.
 
 ## Current data path
 
@@ -60,8 +79,9 @@ raw public and clinical sources
 4. `validation_report.md` - current validation summary.
 5. `ingest/README.md` - real-data benchmark pipeline.
 6. `../plan.md` - setup and run commands.
-7. `../gap.md` - unfinished todos.
-8. Source files in `engine/`, `evidence/`, `validation/`, `ingest/`,
+7. `cli.py` - operator CLI (`reclass`) over the runnable workflows.
+8. `../gap.md` - unfinished todos.
+9. Source files in `engine/`, `evidence/`, `validation/`, `ingest/`,
    `monitoring/`, `ops/`, `api/`, `reporting/`, `storage/`, and `db/`.
 
 ## Validation commands
@@ -86,17 +106,25 @@ Expected current interpretation:
 - Synthetic validation passes.
 - ClinGen real validation passes when the engine is fed expert-applied criteria.
 - Raw ClinVar validation fails because the fixture lacks complete ACMG evidence.
-- Enriched ClinVar validation still fails, but direct ClinGen matches improve
-  definitive concordance and reduce serious errors.
+- Enriched ClinVar validation still fails, but direct ClinGen matches plus
+  canonical-key and genomic-HGVS fallbacks improve definitive concordance and
+  reduce serious errors.
 
 ## Open items
 
-- Wire a local production GRCh38 FASTA into workflows that need reference-backed
-  normalization at scale.
+- Obtain credentialed clinical sign-off and run a formal clinical validation
+  study; clinically review and locally sign off the reconstructed config, VCEP
+  overrides, and PS4 rules before real-world use.
+- Secure data licensing for clinical use.
 - Refresh source snapshots under `docs/data_governance.md` when updating public
   inputs.
-- Broaden evidence providers beyond the current public ClinGen/REVEL/gnomAD slice.
-- Clinically review and locally sign off the reconstructed config, VCEP overrides,
-  and PS4 rules before real-world use.
-- Build a clinician-facing frontend and production deployment/integration layer if
-  the project moves beyond the local service proof of concept.
+- Broaden evidence providers beyond the current ClinGen/REVEL/gnomAD slice and the
+  extended structured-provider layer by wiring validated upstream sources and
+  clinical review workflows to those inputs.
+- Roll out a real identity provider against the existing RS256/JWKS OIDC support
+  and harden the proof-of-concept deployment and API auth/audit surfaces for
+  production.
+- Convert the implemented migration ledger, backup script, restore script, and
+  local restore rehearsal into production disaster-recovery policy.
+- Connect the deterministic FHIR Genomics serializer to live LIS/EHR workflows
+  only after local integration validation.

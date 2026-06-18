@@ -44,10 +44,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.scoring import classify_signals  # noqa: E402
 from engine import config as C  # noqa: E402
 from engine.config_registry import get_config  # noqa: E402
+from reporting.reviewer import build_validation_review_packet  # noqa: E402
 
 try:
+    from validation import fixture_splits as FS  # noqa: E402
     from validation import harness as H  # noqa: E402
 except Exception:  # pragma: no cover - script-dir fallback
+    import fixture_splits as FS  # type: ignore  # noqa: E402
     import harness as H  # type: ignore  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -149,6 +152,7 @@ def score_under_config(benchmark: dict, config) -> dict:
 
     ``config=None`` uses the base engine config (identical to the harness).
     """
+    FS.assert_not_holdout(benchmark, purpose="threshold sensitivity")
     n = serious = overall = def_n = def_match = 0
     for case in benchmark.get("cases", []):
         expected = case["expected"]
@@ -209,6 +213,7 @@ def default_perturbations(base=None) -> list:
 
 def threshold_sensitivity(benchmark: dict, perturbations=None) -> dict:
     """Re-score under base + each perturbation; report metric deltas vs base."""
+    FS.assert_not_holdout(benchmark, purpose="threshold sensitivity")
     base_metrics = score_under_config(benchmark, None)
     rows = []
     for name, desc, cfg in (perturbations or default_perturbations()):
@@ -255,11 +260,51 @@ def serious_discordances(results: list) -> list:
     return out
 
 
+def _classification_packet_dict(case: dict) -> dict:
+    cls = classify_signals(case.get("signals", {}) or {})
+    return {
+        "tier": cls.tier,
+        "total_points": cls.total_points,
+        "engine_version": cls.engine_version,
+        "reconstruction_hash": cls.reconstruction_hash,
+        "overrides": list(cls.overrides),
+        "variant_key": case.get("variant_key"),
+    }
+
+
+def review_packets_for_serious_discordances(benchmark: dict, results: list | None = None) -> list:
+    """Build machine-readable reviewer packets for serious calibration cases."""
+    results = results or H.evaluate(benchmark)
+    cases_by_id = {case.get("id"): case for case in benchmark.get("cases", []) or []}
+    packets = []
+    for result in results:
+        if not result.get("serious"):
+            continue
+        case = cases_by_id.get(result.get("id"))
+        if not case:
+            continue
+        packets.append(
+            build_validation_review_packet(
+                benchmark=benchmark.get("benchmark"),
+                case=case,
+                result=result,
+                classification=_classification_packet_dict(case),
+                root_cause_category="calibration_serious_discordance",
+                proposed_remediation=(
+                    "Credentialed reviewer must adjudicate the pathogenic-vs-benign "
+                    "discordance before release."
+                ),
+            )
+        )
+    return packets
+
+
 # --------------------------------------------------------------------------- #
 # Top-level analysis                                                          #
 # --------------------------------------------------------------------------- #
 def calibrate(benchmark: dict, *, run_sensitivity: bool = True) -> dict:
     """Build the full calibration analysis from a benchmark dict."""
+    FS.assert_not_holdout(benchmark, purpose="calibration")
     results = H.evaluate(benchmark)
     overall = _block(results)
 
@@ -280,6 +325,7 @@ def calibrate(benchmark: dict, *, run_sensitivity: bool = True) -> dict:
         "low_performing_vcep": low_performing_groups(by_vcep),
         "low_performing_genes": low_performing_groups(by_gene),
         "serious_discordances": serious_discordances(results),
+        "review_packets": review_packets_for_serious_discordances(benchmark, results),
     }
     if run_sensitivity:
         analysis["threshold_sensitivity"] = threshold_sensitivity(benchmark)

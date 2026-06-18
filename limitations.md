@@ -1,226 +1,299 @@
 # Limitations - Genuine Model Boundaries
 
-This file describes the genuine limits of application and realism for the
-Standardized Variant Reclassification Engine in `ReClass Model/`.
+This file states the real limits of the model in
+[`ReClass Model/`](ReClass%20Model/). It is not a backlog, a bug list, a release
+plan, or a set of improvement suggestions. Those live in [`gap.md`](gap.md) and
+[`roadmap.md`](roadmap.md).
 
-It is intentionally not a roadmap. It does not list features to build, bugs to fix,
-or engineering next steps. Those belong in `gap.md`. The purpose of this document
-is to state what the model cannot legitimately claim, even when the code is working
-as intended.
+The purpose here is narrower: to say what ReClass can and cannot legitimately be
+used to claim, even when the implementation is working as intended.
 
-The shortest honest description is:
+The shortest honest version:
 
-> ReClass is a deterministic calculator for structured ACMG/AMP-style evidence. It
-> is not a clinical authority, not an evidence-discovery system, not a biological
-> truth oracle, and not a general model of patient risk.
+> ReClass is a deterministic calculator for structured ACMG/AMP-style variant
+> evidence. It is not a clinical authority, not an autonomous evidence curator,
+> not a biological truth oracle, and not a patient-risk model.
 
----
+## What Is Being Modeled
 
-## What the validation actually shows
+ReClass models the final scoring step of germline variant interpretation: given a
+set of structured evidence events, it applies a versioned ACMG/AMP-style point
+configuration and returns a five-tier classification:
 
-The validation results establish a useful boundary around the project:
+- Pathogenic
+- Likely Pathogenic
+- Variant of Uncertain Significance
+- Likely Benign
+- Benign
 
-| Benchmark | Cases | Evidence condition | Definitive concordance | Serious discordance | What it means |
+That is the model boundary. ReClass does not model the entire clinical
+interpretation process. In real practice, variant classification also depends on
+literature review, assay validation, disease mechanism, inheritance context,
+phenotype fit, segregation review, cohort interpretation, ancestry-aware frequency
+judgment, VCEP-specific rules, laboratory policy, and credentialed sign-off. The
+folder contains infrastructure around some of those activities, but the scoring
+model itself remains a structured-evidence calculator.
+
+## What The Validation Actually Shows
+
+The validation fixtures bound a specific question: how the same deterministic
+scoring engine behaves under different evidence conditions. They do not prove
+clinical readiness or biological truth.
+
+| Benchmark | Cases | Evidence condition | Definitive concordance | Serious discordance | What it shows |
 |---|---:|---|---:|---:|---|
-| `synthetic_v1` | 25 | Hand-authored rule cases | 90.5% | 0 | Harness and scoring plumbing behave as expected; this is not clinical evidence. |
-| `clingen_real_v1` | 12,446 | Expert-applied ClinGen criteria are supplied | 94.7% | 4 | The point model usually reproduces panel tiers when fed structured expert criteria. |
-| `clinvar_real_v1` | 21,638 | Sparse public signals: mostly labels plus REVEL/frequency | 5.0% | 34 | Sparse public annotations do not reproduce expert classification. |
-| `clinvar_enriched_v1` | 21,638 | ClinVar plus direct ClinGen evidence matches where available | 37.8% | 9 | Adding expert criteria helps substantially, but coverage remains the limiting factor. |
+| `synthetic_v1` | 32 | Hand-authored rule cases | 92.9% | 0 | The harness and scoring plumbing behave as expected on curated examples |
+| `clingen_real_v1` | 12,446 | Expert-applied ClinGen criteria supplied | 94.7% | 4 | The point model usually reproduces expert-panel tiers when supplied expert criteria |
+| `clinvar_real_v1` | 21,638 | Sparse public labels plus limited REVEL/frequency signals | 5.0% | 34 | Sparse public annotations do not reproduce expert classification |
+| `clinvar_enriched_v1` | 21,638 | ClinVar plus matched ClinGen criteria where available | 42.4% | 6 | Recovered structured criteria help substantially, but evidence coverage still limits realism |
 
-These numbers do not say "the model is clinically accurate." They say something
-narrower and more important: the same deterministic scoring logic works well when
-the right structured evidence is supplied and fails honestly when that evidence is
-absent. The realism limit is therefore not just code quality. It is the availability,
-quality, specificity, and human interpretation of evidence.
+The central finding is not "the model is clinically accurate." It is that the
+scoring core is most realistic when the relevant curated evidence has already
+been supplied, and least realistic when asked to infer a full classification from
+sparse public signals.
 
-## 1. It is decision support, never a diagnosis
+The validation therefore bounds evidence dependence, not autonomous clinical
+competence.
 
-ReClass produces an evidence-based tier calculation. It does not produce a medical
-diagnosis, a clinical reportable result, or an autonomous treatment recommendation.
+## 1. ReClass Is Decision Support, Not A Diagnosis
 
-This is a hard boundary of the project:
+ReClass cannot diagnose a patient, decide whether a patient has a disease, decide
+what should be reported clinically, recommend treatment, or substitute for a
+qualified reviewer. Its output is an evidence-based tier and an auditable receipt,
+not a medical conclusion.
 
-- It cannot be used without qualified human review.
-- It cannot decide whether a patient has a disease.
-- It cannot decide whether a variant should be reported clinically.
-- It is not FDA-cleared, CLIA-validated, or otherwise authorized as a clinical
-  device.
+The folder includes draft persistence, reviewer reports, patient-safe summaries,
+sign-off states, and API surfaces, but those do not turn the model into a
+clinical device. The current configuration state explicitly remains
+`governance_reviewed_pending_credentialed_signoff`, and the project is not
+FDA-cleared, CLIA-validated, or authorized for autonomous patient reporting.
 
-Human sign-off is not a user-interface detail. It is part of the valid scope of the
-model.
+## 2. The Model Scores Evidence; It Does Not Establish Evidence
 
-## 2. It scores evidence; it does not create evidence
+The engine can combine ACMG/AMP criteria and selected source signals. It cannot
+independently determine whether the evidence itself is true.
 
-The engine can combine structured criteria that are supplied to it. It cannot
-independently determine whether those criteria are true.
+It cannot, by itself:
 
-For example, it cannot:
+- read the literature and decide whether a paper supports PS3, BS3, PS4, PP1, or
+  PP4;
+- decide whether a functional assay is valid for a specific gene, disease, and
+  mechanism;
+- assess segregation from a raw pedigree;
+- determine phenotype specificity from a patient chart;
+- decide whether a ClinVar or ClinGen assertion is currently correct;
+- infer missing case-control, proband, phasing, or family evidence that was never
+  supplied;
+- resolve source conflicts without human review and local policy.
 
-- read a paper and decide whether the study supports PS3 or BS3,
-- judge whether a functional assay is valid for a disease mechanism,
-- assess segregation evidence from a pedigree,
-- determine phenotype specificity from a patient chart,
-- verify whether a ClinVar or ClinGen assertion is correct,
-- discover missing case-control, proband, or family evidence.
+The extended providers in `ReClass Model/evidence/criteria_ext.py` do not remove
+this limit. They map structured inputs into criteria. They do not turn raw
+biology, raw charts, raw papers, or raw pedigrees into validated evidence on their
+own.
 
-This is the central model limitation. ReClass is a calculator over evidence, not an
-expert curator. If the evidence is absent, incomplete, incorrectly mapped, outdated,
-or biologically inappropriate, the calculation inherits that problem.
+## 3. Evidence Completeness Is A Hard Realism Limit
 
-## 3. A VUS can be a real endpoint, not a failure state
+The model can only be as realistic as the evidence bundle it receives. When the
+right structured evidence is supplied, the ClinGen benchmark shows high
+concordance with reference panel tiers. When evidence is sparse, the raw ClinVar
+benchmark collapses.
 
-Many variants are genuinely uncertain because the world does not yet contain enough
-reliable evidence about them. In those cases, "VUS" is not a placeholder for a
-future feature. It is the correct epistemic state.
+That is not just an implementation gap. Variant interpretation often depends on
+evidence classes that are not universally available, not machine-readable, not
+current, not public, or not reducible to a single annotation score. More source
+coverage can improve a particular evidence class, but the model will still
+inherit the quality, specificity, and provenance of the evidence it is given.
 
-The model cannot make a rare or poorly studied variant meaningful by force. It can
-only expose that available evidence does not justify a pathogenic or benign tier.
-This matters because pressure to avoid VUS can create false certainty.
+Absence of evidence in ReClass must not be read as evidence of benignity,
+pathogenicity, or clinical irrelevance.
 
-## 4. The point model is a simplified model of expert reasoning
+## 4. A VUS Can Be The Correct Final Output
 
-ReClass uses a deterministic Tavtigian/ClinGen SVI-style point system. That choice
-gives reproducibility, auditability, and reconstruction hashes, but it also creates
-a realism ceiling.
+ReClass is allowed to return Variant of Uncertain Significance because many
+variants are genuinely uncertain. A VUS is not automatically a failure, a bug, or
+an unfinished classification.
 
-Expert ACMG/AMP interpretation is not purely additive. Human panels consider
-context such as:
+Under the configured point model, a VUS means the supplied evidence does not reach
+the pathogenic or benign threshold. For rare, novel, private, poorly studied, or
+context-dependent variants, that may be the most accurate answer available. Using
+the model to force resolution would create false certainty rather than better
+classification.
 
-- gene-specific disease mechanism,
-- disease prevalence and penetrance,
-- known founder effects,
-- assay validity,
-- variant mechanism,
-- inheritance mode,
-- phenotype fit,
-- criterion interactions,
-- panel-specific rule modifications,
-- whether conflicting evidence should be discounted rather than summed.
+## 5. The Point System Is A Simplification Of Expert Reasoning
 
-A transparent point total can approximate this reasoning. It cannot fully become
-it. The residual serious discordances in `clingen_real_v1`, despite supplied expert
-criteria, are evidence of that ceiling.
+ReClass uses a transparent Tavtigian/ClinGen SVI-style Bayesian point framework:
+evidence strengths become signed points, and point totals map to classification
+tiers. This gives reproducibility, auditability, and stable reconstruction hashes.
 
-## 5. Agreement with references is not the same as truth
+It also imposes a ceiling. Expert interpretation is not purely additive. Human
+panels consider disease mechanism, inheritance, penetrance, phenotype fit,
+population structure, assay validity, source confidence, criterion interactions,
+and VCEP-specific rule modifications. Sometimes evidence should be discounted,
+excluded, or treated as context-specific rather than simply summed.
 
-The validation reports measure concordance with reference labels. Those labels are
-important, but they are not biological ground truth.
+The four serious discordances in `clingen_real_v1` are evidence of that ceiling:
+even with expert-applied criteria already supplied, a general point model does not
+perfectly reproduce panel decisions.
 
-ClinVar and ClinGen assertions can be:
+Encoding VCEP, gene, or disease overrides can reduce this mismatch for a defined
+scope, but it does not remove the limit. Disease-specific interpretation is a
+moving expert-curation activity, not something the general point model can infer
+from coordinates alone.
 
-- incomplete,
-- outdated,
-- inconsistent across submitters or panels,
-- affected by changing guideline versions,
-- affected by panel-specific disease context,
-- revised when new evidence appears.
+## 6. Reference Concordance Is Not Biological Truth
 
-Therefore a high concordance number means "the model reproduces this reference
-source under these inputs." It does not prove that the variant tier is true in a
-timeless or absolute sense.
+The validation numbers measure agreement with reference labels, not truth in an
+absolute sense. ClinVar and ClinGen records can be incomplete, outdated,
+panel-specific, disease-context-specific, or revised when evidence changes.
 
-## 6. The benchmarks are not equivalent to a clinical intake stream
+So "94.7% definitive concordance" means the engine usually reproduces the
+reference panel tier under that fixture and evidence condition. It does not prove
+that every reproduced tier is biologically correct, clinically reportable, or
+permanent.
 
-The fixtures are useful for reproducible validation, but they are not a faithful
-sample of future clinical work.
+Likewise, poor raw ClinVar concordance does not prove the scoring logic is
+broken. It proves that sparse public labels and a small set of automated signals
+are not enough to reconstruct the evidence experts used.
 
-Public databases over-represent variants that have already attracted expert
-attention. A real intake stream can contain novel, private, rare, poorly
-phenotyped, or technically difficult variants. Those are exactly the cases where
-structured evidence is least available and where deterministic scoring has the
-least to work with.
+## 7. The Benchmarks Are Not A Real Clinical Intake Stream
 
-The synthetic benchmark is especially limited: it checks the harness and rule
-plumbing. It should not be cited as clinical performance evidence.
+The current real-data fixtures are useful for reproducible evaluation, but they
+are not a representative sample of future clinical workload.
 
-## 7. Automated evidence coverage is biologically narrow
+Public databases over-represent variants that have already attracted attention,
+curation, publication, or submission. A real intake stream may contain private
+variants, novel alleles, low-quality external evidence, missing phenotype data,
+technically difficult variant classes, and cases where laboratory context matters.
 
-The model's strongest automated evidence channels are currently structured
-ClinGen-applied criteria, REVEL missense prediction, gnomAD frequency evidence, and
-configured cohort-count PS4 evidence.
+The synthetic fixture is especially limited: it exercises rules and plumbing. It
+should not be cited as clinical performance evidence.
 
-That makes the automated layer much more realistic for some situations than others.
-It is weakest where classification depends on evidence types the system cannot
-derive on its own, including:
+## 8. Variant-Class Coverage Is Uneven By Nature
 
-- splice mechanism,
-- copy-number variation,
-- structural variation,
-- repeat expansion,
-- mitochondrial interpretation,
-- non-coding regulatory impact,
-- complex indels,
-- functional assay interpretation,
-- detailed phenotype matching,
-- segregation analysis.
+ReClass is strongest where evidence can be expressed cleanly as ACMG/AMP criteria
+or calibrated source signals: expert-applied ClinGen criteria, allele frequency,
+missense computational evidence, and reviewer-supplied structured criteria.
 
-This is not just an implementation gap. Many of these evidence classes require
-human domain judgment, disease-specific standards, laboratory context, or external
-data that is not reducible to a universal annotation score.
+It is less realistic for variant classes and contexts where interpretation
+depends on highly specialized, disease-specific, or patient-specific judgment,
+including:
 
-## 8. Population-frequency reasoning inherits population bias
+- structural variants and complex rearrangements;
+- repeat expansions;
+- mitochondrial variants and heteroplasmy;
+- non-coding and regulatory variants;
+- complex indels;
+- mosaicism;
+- pharmacogenomic or risk-modifier interpretations;
+- somatic oncology interpretation;
+- polygenic risk or multifactorial disease risk.
 
-Frequency criteria such as BA1, BS1, and PM2 depend on reference population data.
-Those data are uneven across ancestries and cohorts. If a population is
-under-sampled, absence or rarity in gnomAD is weaker evidence than it might appear.
-If a founder pathogenic variant is common in a particular group, naive frequency
-rules can be actively misleading.
+Some of these have structured-input providers in the folder. That means the
+system can score a reviewed signal if one is supplied. It does not mean the model
+autonomously understands every biological context behind that signal.
 
-The engine can record thresholds and provenance, but it cannot remove ascertainment
-bias from the source database. It also cannot make equity claims from the current
-real fixtures, because the available real-data group fields primarily encode
-expert-panel context rather than true patient ancestry strata.
+## 9. Automated Source Signals Are Narrow Proxies
 
-## 9. The model is not a patient-risk model
+The source signals ReClass can partly automate are useful, but each is a proxy for
+a narrower evidence question:
 
-An ACMG/AMP tier is about evidence for variant pathogenicity. It is not the same as
-an individual's medical prognosis.
+- REVEL and AlphaMissense apply to missense substitutions covered by their
+  precomputed tables. They do not help with loss-of-function, regulatory,
+  structural, repeat-expansion, mitochondrial, or many splice mechanisms.
+- Computational predictors are intentionally collapsed into a single PP3/BP4-style
+  contribution rather than stacked as independent evidence. They can support a
+  classification; they cannot carry one on their own.
+- Public-label and predictor benchmarks can be inflated by source overlap, because
+  predictors and public assertions may share historical ClinVar or known-variant
+  training material.
+- ClinGen evidence matching transfers criteria that expert panels already applied.
+  It does not create criteria for unmatched variants or prove that a matched
+  assertion remains correct in a different clinical context.
 
-ReClass does not estimate:
+These are not bugs. They are the realism boundary of automated evidence signals:
+they are evidence fragments, not comprehensive variant interpretation.
 
-- penetrance,
-- expressivity,
-- age of onset,
-- disease severity,
-- treatment response,
-- management recommendations,
-- personal absolute risk,
-- reproductive risk outside the supplied inheritance context.
+## 10. Population-Frequency Reasoning Inherits Population Bias
 
-Using a tier as though it directly answered any of those questions exceeds the
-model.
+BA1, BS1, and PM2-style frequency evidence depends on reference-population data.
+Those data are uneven across ancestries, cohorts, sequencing methods, and disease
+ascertainment histories.
 
-## 10. Determinism is version-bounded
+If a population is under-sampled, rarity in a database may be less meaningful
+than it appears. If a founder pathogenic allele is relatively common in a
+specific group, a naive frequency threshold can be misleading. ReClass can record
+thresholds, source versions, warnings, and reviewable exceptions, but it cannot
+remove bias from the underlying population resource.
 
-The reproducibility guarantee is precise but limited:
+Current fixtures also do not support strong equity or ancestry-performance
+claims. The relevant patient-ancestry data are largely absent, so the model cannot
+be said to have been validated equally across populations.
 
-> same evidence + same engine version + same configuration version = same result
+## 11. A Variant Tier Is Not A Patient-Risk Estimate
+
+An ACMG/AMP tier is a statement about evidence for variant pathogenicity in a
+specified interpretive context. It is not an individualized clinical-risk model.
+
+A ReClass tier must not be interpreted as:
+
+- penetrance;
+- expressivity;
+- age of onset;
+- prognosis;
+- disease severity;
+- treatment response;
+- reproductive risk without a supplied inheritance context;
+- patient-management guidance.
+
+Those conclusions require clinical context outside the model.
+
+## 12. Determinism Is Version-Bounded
+
+ReClass is deterministic in a precise sense:
+
+> same evidence + same engine version + same configuration version = same tier
 > and same reconstruction hash.
 
-It does not mean the classification is permanent. Updated evidence, updated source
-snapshots, updated VCEP guidance, or changed configuration can correctly produce a
-different tier. A result is a versioned snapshot of evidence interpretation, not a
+That does not mean a classification is permanent. A tier can correctly change
+when evidence changes, source snapshots change, VCEP guidance changes, or a
+versioned configuration changes. Reanalysis detects and records that movement; it
+does not eliminate it.
+
+The output is a reproducible snapshot of an evidence interpretation, not a
 timeless property of the variant.
 
-## 11. The model does not learn
+## 13. The Model Does Not Learn Or Discover Biology
 
-ReClass is deliberately a rules engine. It does not update itself from outcomes,
-discover new pathogenic mechanisms, infer new evidence types, or recalibrate
-thresholds by watching future cases.
+The scoring core is deliberately rule-based. It does not train on outcomes,
+update itself from future cases, infer new mechanisms, recalibrate thresholds in
+the background, or discover new disease relationships.
 
-That limitation is also part of its strength. The model is inspectable and
-reconstructable because the rules are explicit. The cost is that biological
-novelty, guideline change, and evidence reinterpretation must enter through
-reviewed evidence and reviewed configuration, not through automatic adaptation.
+That is a strength for auditability and reconstruction. It is also a limit:
+biological novelty, guideline change, and source reinterpretation enter only
+through reviewed evidence and reviewed configuration.
 
-## Bottom line
+## 14. Local Workflow Surfaces Do Not Expand The Model Boundary
 
-ReClass is most realistic when it is used as a transparent, reproducible calculator
-for already-curated ACMG/AMP evidence. It is least realistic when it is asked to act
-like an autonomous curator, clinician, literature reviewer, phenotype interpreter,
-or all-variant biological predictor.
+The folder contains API routes, storage, reporting, audit logging, authentication
+surfaces, reviewer UI, reanalysis queues, FHIR serialization, and deployment
+artifacts. These are workflow and governance infrastructure around the model.
+
+They do not change what the model can infer. A polished service surface can make
+classification review more traceable, but it cannot turn sparse evidence into
+complete evidence, turn concordance into truth, or turn decision support into
+clinical authority.
+
+## Bottom Line
+
+ReClass is most realistic when used as a transparent, reproducible calculator for
+already-curated ACMG/AMP-style evidence. It is least realistic when asked to act
+as an autonomous curator, clinician, literature reviewer, phenotype interpreter,
+or universal biological predictor.
 
 Its genuine limits are that it cannot manufacture evidence, cannot exceed the
-quality of its sources, cannot convert concordance into truth, cannot replace
-expert judgment, cannot make equity claims from biased reference data, cannot
-generalize equally across variant classes, and cannot be used as a clinical device.
+quality and completeness of its sources, cannot convert benchmark concordance into
+truth, cannot fully reproduce expert judgment with an additive point total,
+cannot turn narrow automated signals into comprehensive interpretation, cannot
+make patient-risk or management claims, cannot erase population bias, and cannot
+be used as a clinical device without external validation, governance, and
+credentialed human review.

@@ -21,32 +21,43 @@ policy, and generated benchmark reports. It is not a finished clinical product.
 | `ReClass Model/README.md` | Technical overview and repository layout |
 | `ReClass Model/manifest.md` | Module/status map |
 | `ReClass Model/engine/` | Deterministic scoring, versioned config, canonical identity, normalization, reference providers, and reference-cache helper |
-| `ReClass Model/evidence/` | Evidence bundle model plus ClinGen, REVEL, and gnomAD providers |
+| `ReClass Model/evidence/` | Evidence bundle model plus ClinGen, REVEL, gnomAD, AlphaMissense, conservation, gene-constraint, and extended structured-evidence providers |
 | `ReClass Model/api/` | Tenant-aware FastAPI service layer |
 | `ReClass Model/reporting/` | Technical reviewer and patient-safe summary reports |
 | `ReClass Model/validation/` | Fixtures, harness, failure analysis, comparison tool, calibration reports, plots, and generated reports |
 | `ReClass Model/ingest/` | ClinGen, ClinVar, REVEL, and targeted gnomAD benchmark builders |
 | `ReClass Model/storage/` + `ReClass Model/db/` | PostgreSQL schema, apply tool, tenant/RLS storage layer, evidence-bundle persistence, cohort counts, and reconstruction verifier |
-| `ReClass Model/ops/` | Reanalysis queue, scheduler, run reports, and repo guard |
-| `ReClass Model/docs/data_governance.md` | Source-version/license register, cache policy, and rebuild instructions |
-| `ReClass Model/tests/` | 389 tests in the current environment |
+| `ReClass Model/ops/` | Reanalysis queue, scheduler, run reports, and repo guard (wired as the `.git/hooks/pre-commit` hook) |
+| `ReClass Model/api/auth.py`, `authz.py`, `audit.py`, `observability.py` | JWT/API-key auth, RBAC, audit log, and `/health` + `/metrics` |
+| `ReClass Model/frontend/` | Static clinician reviewer UI served at `/reviewer/` |
+| `ReClass Model/deploy/` | Containerized deployment plus backup/restore scripts: `Dockerfile`, `docker-compose.yml`, `backup.sh`, `restore.sh` |
+| `ReClass Model/docs/` | Governance, clinical review, release policy, conflict handling, operations SOP, deployment, auth, and release review docs |
+| `ReClass Model/cli.py` | Operator CLI (`reclass`) wrapping classify, validate, reference status, compare, calibration, and report regeneration |
+| `ReClass Model/tests/` | 781 tests in the current environment |
 | `plots/` | PNG diagnostics generated from validation reports |
 
 Verified status:
 
-- Unit/integration suite: 389 tests passing in the current environment.
-- Synthetic validation: PASS, 90.5% definitive concordance.
+- Unit/integration suite: 781 tests passing in the current environment.
+- Synthetic validation: PASS, 92.9% definitive concordance.
 - ClinGen real validation: PASS, 94.7% definitive concordance.
 - Raw ClinVar validation: expected FAIL, 5.0% definitive concordance.
-- ClinVar enriched with direct ClinGen Variation ID matches: expected FAIL, but
-  improved to 37.8% definitive concordance and 9 serious errors.
+- ClinVar enriched with direct ClinGen Variation ID, canonical SNV-key, and
+  genomic-HGVS matches: expected FAIL, but improved to 42.4% definitive
+  concordance and 6 serious errors.
 - REVEL and gnomAD providers: implemented with mocked/offline unit tests and local
   provider caches under `data/cache/providers/`.
+- AlphaMissense, conservation, gene-constraint, and extended structured-evidence
+  providers are implemented with offline tests and versioned config files
+  (`computational_ext_v1.json`, `coverage_ext_v1.json`).
 - API/reporting/sign-off: implemented and tested without requiring a live database.
 - Storage/ops/reanalysis: implemented and tested against PostgreSQL in the current
   environment.
-- Reference cache status helper: implemented; default GRCh38 FASTA is not bundled
-  and is currently missing unless supplied locally.
+- Reference cache status helper: implemented; a local GRCh38 FASTA (Ensembl
+  release-110, 3.1 GB) is now installed and the reference cache reports it present.
+  Identity audits were re-run with reference-backed left-alignment (see
+  `ReClass Model/validation/reports/identity_audit_grch38.md`). The FASTA remains
+  gitignored/local-only and is not committed.
 
 ## 2. Prerequisites
 
@@ -100,13 +111,13 @@ cd "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model"
 Expected current result:
 
 ```text
-Ran 389 tests
+Ran 781 tests
 OK
 ```
 
 PostgreSQL/RLS integration tests skip cleanly if a database is not reachable. In
 the current audited environment PostgreSQL and `psycopg` are available, so the full
-389-test suite executes.
+781-test suite executes.
 
 ## 5. Run validation
 
@@ -126,10 +137,10 @@ Expected current outcomes:
 
 | Benchmark | Gate | Cases | Definitive concordance | Serious discordance | Overall exact concordance |
 |---|---|---:|---:|---:|---:|
-| `synthetic_v1` | PASS | 25 | 90.5% | 0 | 92.0% |
+| `synthetic_v1` | PASS | 32 | 92.9% | 0 | 93.8% |
 | `clingen_real_v1` | PASS | 12,446 | 94.7% | 4 | 93.0% |
 | `clinvar_real_v1` | FAIL | 21,638 | 5.0% | 34 | 19.9% |
-| `clinvar_enriched_v1` | FAIL | 21,638 | 37.8% | 9 | 43.3% |
+| `clinvar_enriched_v1` | FAIL | 21,638 | 42.4% | 6 | 46.6% |
 
 The ClinVar failures are expected. Raw ClinVar mostly contains labels plus partial
 frequency/REVEL evidence, not complete structured ACMG evidence. The enriched
@@ -141,15 +152,18 @@ Reports are written to `validation/reports/`.
 ## 6. Evidence providers and ClinVar enrichment
 
 The evidence-provider layer is implemented in `ReClass Model/evidence/`.
-ClinGen matching enriches ClinVar cases by ClinVar Variation ID and appends
-ClinGen-applied ACMG criteria while preserving the original ClinVar expected label.
-REVEL and gnomAD providers expose the same evidence used by their ingest scripts
-as reusable, cached, provenance-rich `EvidenceBundle`s.
+ClinGen matching enriches ClinVar cases by ClinVar Variation ID plus canonical-key
+fallback and appends ClinGen-applied ACMG criteria while preserving the original
+ClinVar expected label. REVEL and gnomAD providers expose the same evidence used
+by their ingest scripts as reusable, cached, provenance-rich `EvidenceBundle`s.
+AlphaMissense, conservation, gene-constraint, and extended structured-evidence
+providers are also implemented; they map supplied evidence to criteria/context but
+do not discover or validate that evidence on their own.
 
 ```bash
 cd "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model"
 ../.venv/bin/python evidence/enrich_clinvar.py
-../.venv/bin/python -m unittest tests.test_revel_provider tests.test_gnomad_provider -v
+../.venv/bin/python -m unittest tests.test_revel_provider tests.test_gnomad_provider tests.test_computational_providers tests.test_criteria_ext_provider -v
 ../.venv/bin/python validation/harness.py clinvar_enriched_v1
 ../.venv/bin/python validation/analyze_failures.py clinvar_enriched_v1
 ../.venv/bin/python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
@@ -159,11 +173,14 @@ Current enrichment summary:
 
 - ClinVar cases: 21,638
 - Direct ClinGen Variation ID matches: 10,649
-- Canonical-key fallback matches in the current fixture: 0
+- Canonical SNV key matches: 940
+- Reference-backed indel key matches: 0
+- Genomic HGVS fallback matches: 381
 - Normalization failures: 2
-- Unmatched: 10,989
-- Cases gaining criteria: 10,649
-- Total criteria added: 33,094
+- Unmatched: 9,668
+- Cases gaining criteria: 11,970
+- Total criteria added: 37,873
+- Cases with warnings: 9,700
 - Label disagreements among matched records: 30
 - Multiple-match cases resolved deterministically: 2
 
@@ -185,7 +202,10 @@ and a summary plot for synthetic, ClinGen, raw ClinVar, and enriched ClinVar.
 ## 8. Reference cache status
 
 The code can use `engine.reference.FastaReference` for reference-backed
-normalization. Whole-genome FASTA files are intentionally not committed.
+normalization. Whole-genome FASTA files are intentionally not committed. A local
+GRCh38 FASTA (Ensembl release-110, 3.1 GB) is now installed in this environment and
+the helper reports it present, but the FASTA must still be supplied per-environment
+(it is gitignored/local-only and is not committed).
 
 Check the current cache status:
 
@@ -230,6 +250,26 @@ Expected behavior:
 
 Prefer imports from `engine.scoring`. The top-level `scoring.py` is a compatibility
 copy.
+
+For day-to-day operation, prefer the `reclass` CLI (`cli.py`) over remembering
+module paths:
+
+```bash
+cd "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model"
+../.venv/bin/python cli.py --help
+../.venv/bin/python cli.py classify --revel 0.95 --gnomad-af 0.000001
+../.venv/bin/python cli.py validate clingen_real_v1
+../.venv/bin/python cli.py reference status
+../.venv/bin/python cli.py compare clinvar_real_v1 clinvar_enriched_v1
+../.venv/bin/python cli.py calibration clingen_real_v1
+../.venv/bin/python cli.py report analytical-validation
+../.venv/bin/python cli.py report failures clinvar_enriched_v1
+```
+
+Most commands accept `--json` for machine-readable output. The CLI is a thin,
+dependency-light wrapper over existing modules; the `classify` path stays a pure
+function of its inputs. Once the package is installed (`pip install -e .`), the same
+commands run as `reclass ...`.
 
 ## 10. Real data currently present
 
@@ -300,9 +340,25 @@ Implemented surfaces include:
 - `GET /classifications/{id}/report/reviewer`
 - `GET /classifications/{id}/report/summary`
 
-Clinical persistence endpoints require an `X-Tenant-Id` UUID header. Unsigned
-classifications remain drafts until the sign-off endpoint records a credentialed
-reviewer.
+Deterministic FHIR Genomics export is implemented in `reporting/fhir.py` and
+covered by `tests/test_fhir.py`, including draft → final → amended report state
+transitions and byte-identical replayable outbound payloads; it is integration
+scaffolding (a serializer plus a replayable payload envelope), not a live LIS/EHR
+endpoint.
+
+The clinician reviewer UI is served at `/reviewer/` when the API is running (the
+`frontend/` static app is mounted there). Unsigned classifications remain drafts
+until the sign-off endpoint records a credentialed reviewer.
+
+Authentication and tenancy depend on the run mode:
+
+- Production mode requires real authentication: a bearer token (JWT) or an API
+  key, with RBAC enforced per route.
+- An `X-Tenant-Id`-only UUID header (no auth) is allowed only in development mode.
+
+This auth/RBAC surface, the reviewer frontend, and the deployment tooling are
+proof-of-concept surfaces; they are not a validated production deployment. See
+`docs/auth.md` and `docs/clinical_review.md` for details.
 
 ## 13. Operations and governance
 
@@ -324,3 +380,62 @@ Operational reanalysis helpers live in `ops/`:
 
 Source versions, licenses, local-cache policy, and rebuild instructions are in
 `ReClass Model/docs/data_governance.md`.
+
+## 14. API auth, RBAC, and observability
+
+The API supports real authentication and role-based access control:
+
+- Bearer tokens (RS256/JWKS OIDC and HS256 JWT) and API keys are accepted; RBAC is
+  enforced per route.
+- The `X-Tenant-Id`-only header path (no credentials) is a development-only
+  convenience and must not be relied on outside development.
+- An append-only audit log records security-relevant actions; the audit router is
+  under `api/routers/audit.py`, with helpers in `api/audit.py`, `api/auth.py`, and
+  `api/authz.py`.
+- Observability endpoints are exposed by `api/observability.py`:
+  - `GET /health` for liveness/readiness checks.
+  - `GET /metrics` for operational metrics scraping.
+
+See `docs/auth.md` for the auth/RBAC model.
+
+## 15. Clinician reviewer frontend
+
+A static clinician reviewer UI lives in `ReClass Model/frontend/` and is mounted at
+`/reviewer/` when the API is running. Start the API (section 12) and open
+`/reviewer/` in a browser. The reviewer workflow (case review, sign-off, and
+conflict handling) is described in `docs/clinical_review.md` and
+`docs/conflict_handling.md`.
+
+This frontend is a proof-of-concept surface, not a validated clinical UI.
+
+## 16. Containerized deployment
+
+Container/deployment tooling lives in `ReClass Model/deploy/`:
+
+- `deploy/Dockerfile` builds the API image.
+- `deploy/docker-compose.yml` brings up the API together with PostgreSQL.
+- `deploy/backup.sh` performs database backups.
+- `deploy/restore.sh` restores explicit backup dumps into explicit target
+  databases with safety checks.
+
+The full deployment runbook (build, run, environment variables, backups, and
+restore) is in `docs/deployment.md`. This deployment is a proof-of-concept surface;
+it is not a validated production deployment and nothing here is FDA-cleared or
+CLIA-validated.
+
+## 17. Additional documentation
+
+Beyond `docs/data_governance.md`, the `ReClass Model/docs/` directory now includes:
+
+- `clinical_review.md` — clinician reviewer workflow.
+- `release_policy.md` — release/versioning policy.
+- `conflict_handling.md` — handling of label/criteria conflicts.
+- `operations_sop.md` — operational standard operating procedures.
+- `deployment.md` — containerized deployment runbook.
+- `auth.md` — authentication and RBAC model.
+- `release_review.md` — release review checklist.
+
+Clinical sign-off remains pending a credentialed human reviewer (status
+`governance_reviewed_pending_credentialed_signoff`). This project is a proof of
+concept; it is not a clinical device and nothing here is FDA-cleared or
+CLIA-validated.

@@ -43,7 +43,10 @@ def _resolver() -> EvidenceResolver:
 class _ApiTestBase(unittest.TestCase):
     def setUp(self) -> None:
         self.store = InMemoryClinicalStore()
-        self.settings = Settings(environment="development")
+        self.settings = Settings(
+            environment="development",
+            legacy_default_roles=("viewer", "reviewer", "operator", "admin"),
+        )
         app = create_app(settings=self.settings, store=self.store, resolver=_resolver())
         self.client = TestClient(app)
         self.tenant_a = str(uuid.uuid4())
@@ -64,7 +67,7 @@ class TestClassifyPreview(_ApiTestBase):
             {"source": "curated", "acmg_criterion": "PVS1",
              "evidence_direction": "pathogenic", "applied_strength": "very_strong"},
         ]}}
-        r = self.client.post("/classify", json=body)
+        r = self.client.post("/classify", json=body, headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertEqual(data["classification"]["tier"], "Likely Pathogenic")
@@ -75,13 +78,14 @@ class TestClassifyPreview(_ApiTestBase):
 
     def test_classify_with_signals(self):
         body = {"evidence": {"signals": {"gnomad_af": 0.20}}}
-        r = self.client.post("/classify", json=body)
+        r = self.client.post("/classify", json=body, headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         # BA1 stand-alone benign rule fires for a 20% allele frequency.
         self.assertEqual(r.json()["classification"]["tier"], "Benign")
 
     def test_classify_missing_evidence_is_vus_with_warning(self):
-        r = self.client.post("/classify", json={"evidence": {"events": []}})
+        r = self.client.post("/classify", json={"evidence": {"events": []}},
+                             headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertEqual(data["classification"]["tier"], "VUS")
@@ -92,7 +96,7 @@ class TestEvidenceResolve(_ApiTestBase):
     def test_resolve_match(self):
         body = {"variant": {"chrom": "1", "pos": 100, "ref": "A", "alt": "G"},
                 "providers": ["revel"]}
-        r = self.client.post("/evidence/resolve", json=body)
+        r = self.client.post("/evidence/resolve", json=body, headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertEqual(len(data["events"]), 1)
@@ -102,7 +106,7 @@ class TestEvidenceResolve(_ApiTestBase):
     def test_resolve_absent(self):
         body = {"variant": {"chrom": "2", "pos": 200, "ref": "C", "alt": "T"},
                 "providers": ["revel"]}
-        r = self.client.post("/evidence/resolve", json=body)
+        r = self.client.post("/evidence/resolve", json=body, headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertEqual(data["events"], [])
@@ -111,7 +115,7 @@ class TestEvidenceResolve(_ApiTestBase):
     def test_resolve_provider_failure(self):
         body = {"variant": {"chrom": "1", "pos": 100, "ref": "A", "alt": "G"},
                 "providers": ["gnomad"]}
-        r = self.client.post("/evidence/resolve", json=body)
+        r = self.client.post("/evidence/resolve", json=body, headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         # Offline cache miss is a deterministic, non-poisoning failure.
         self.assertIn("gnomad:gnomad_not_cached", r.json()["warnings"])
@@ -119,13 +123,41 @@ class TestEvidenceResolve(_ApiTestBase):
     def test_resolve_unknown_provider(self):
         body = {"variant": {"chrom": "1", "pos": 100, "ref": "A", "alt": "G"},
                 "providers": ["does_not_exist"]}
-        r = self.client.post("/evidence/resolve", json=body)
+        r = self.client.post("/evidence/resolve", json=body, headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         self.assertIn("unknown_provider:does_not_exist", r.json()["warnings"])
 
     def test_invalid_variant_identity(self):
-        r = self.client.post("/evidence/resolve", json={"variant": {}})
+        r = self.client.post("/evidence/resolve", json={"variant": {}},
+                             headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 422)
+
+
+class TestEvidenceProviders(_ApiTestBase):
+    """GET /evidence/providers — the configured-provider catalog the reviewer UI
+    uses to populate its provider panel before any resolve (no hardcoded list)."""
+
+    def test_lists_configured_providers_with_versions(self):
+        r = self.client.get("/evidence/providers", headers=self.h(self.tenant_a))
+        self.assertEqual(r.status_code, 200)
+        providers = r.json()["providers"]
+        names = [p["name"] for p in providers]
+        # The base fixture registers revel + gnomad; the list is sorted by name.
+        self.assertEqual(names, sorted(names))
+        self.assertEqual(set(names), {"gnomad", "revel"})
+        by_name = {p["name"]: p["version"] for p in providers}
+        self.assertTrue(by_name["revel"])  # each provider reports a source version
+        self.assertTrue(by_name["gnomad"])
+
+    def test_empty_resolver_returns_empty_catalog(self):
+        # A backend with no providers configured still answers (graceful empty),
+        # so the client never blocks on a missing list.
+        app = create_app(settings=self.settings, store=self.store,
+                         resolver=EvidenceResolver())
+        client = TestClient(app)
+        r = client.get("/evidence/providers", headers=self.h(self.tenant_a))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["providers"], [])
 
 
 class TestTenancy(_ApiTestBase):
@@ -287,22 +319,26 @@ class TestReanalysisAndAlerts(_ApiTestBase):
 
 class TestValidationEndpoint(_ApiTestBase):
     def test_validation_run_development(self):
-        r = self.client.post("/validation/run", json={"benchmark": "synthetic_v1"})
+        r = self.client.post("/validation/run", json={"benchmark": "synthetic_v1"},
+                             headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertIn("gate_pass", data)
         self.assertIn("metrics", data)
 
     def test_validation_unknown_benchmark(self):
-        r = self.client.post("/validation/run", json={"benchmark": "no_such_bench"})
+        r = self.client.post("/validation/run", json={"benchmark": "no_such_bench"},
+                             headers=self.h(self.tenant_a))
         self.assertEqual(r.status_code, 404)
 
     def test_validation_blocked_in_production(self):
-        app = create_app(settings=Settings(environment="production"),
-                         store=InMemoryClinicalStore(), resolver=_resolver())
+        app = create_app(
+            settings=Settings(environment="production", jwt_secret="test-secret"),
+            store=InMemoryClinicalStore(), resolver=_resolver(),
+        )
         client = TestClient(app)
         r = client.post("/validation/run", json={"benchmark": "synthetic_v1"})
-        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.status_code, 401)
 
 
 class TestReportEndpoints(_ApiTestBase):

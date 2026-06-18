@@ -22,6 +22,7 @@ psycopg/PostgreSQL:
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from engine import config as C
@@ -31,7 +32,13 @@ from ops import run_report as rr
 from ops.run_report import RunReport, VariantOutcome
 
 # Triggers the scheduler understands (mirrors ops.queue._VALID_TRIGGERS).
-TRIGGERS = ("evidence", "provider_version", "config_version")
+TRIGGERS = (
+    "evidence",
+    "source_snapshot",
+    "provider_version",
+    "config_version",
+    "conflict_policy",
+)
 
 # --------------------------------------------------------------------------- #
 # Deterministic reason codes (failed/skipped)                                  #
@@ -40,6 +47,8 @@ MISSING_PROVIDER_CACHE = "missing_provider_cache"      # a provider cache file/e
 UNAVAILABLE_REFERENCE = "unavailable_reference"        # GRCh38 FASTA / reference not loadable
 INVALID_VARIANT_IDENTITY = "invalid_variant_identity"  # variant key/coords cannot be resolved
 CONFIG_VERSION_CHANGED = "config_version_changed"      # informational trigger reason
+SOURCE_SNAPSHOT_CHANGED = "source_snapshot_changed"    # source checksum/version changed
+CONFLICT_POLICY_CHANGED = "conflict_policy_changed"    # conflict-policy config changed
 NO_EVIDENCE = "no_evidence"                            # nothing to score -> skip
 NOT_APPLICABLE = "not_applicable"                      # rule/condition not applicable -> skip
 
@@ -112,6 +121,58 @@ def config_version_changed(previous: Optional[str],
                            current: str = C.ENGINE_VERSION) -> bool:
     """True iff the engine/config version differs from the last-seen one."""
     return previous != current
+
+
+def source_snapshot_changes(
+    previous: Dict[str, str],
+    current: Dict[str, str],
+) -> Dict[str, Tuple[Optional[str], str]]:
+    """Return changed/added source snapshot checksums or versions."""
+    return provider_version_changes(previous, current)
+
+
+def conflict_policy_changed(previous: Optional[str], current: str) -> bool:
+    """True iff the conflict-policy version/hash differs from the last-seen one."""
+    return previous != current
+
+
+def enqueue_affected_variants(
+    variant_ids: Iterable[str],
+    *,
+    trigger: str,
+    cause: str,
+    run_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    priority: int = 0,
+    queue: Optional[q.InMemoryQueue] = None,
+) -> Tuple[q.InMemoryQueue, Dict[str, Any]]:
+    """Enqueue affected variants and return ``(queue, auditable_manifest)``.
+
+    This DB-free helper is used by tests, dry runs, and deployment automation
+    before handing work to the durable DB queue. It validates trigger names, keeps
+    in-memory de-duplication semantics, and records the trigger cause plus run id
+    in a manifest that can be archived with the run report.
+    """
+    if trigger not in TRIGGERS:
+        raise ValueError(f"invalid trigger {trigger!r}; expected one of {TRIGGERS}")
+    run_id = run_id or str(uuid.uuid4())
+    work_queue = queue or q.InMemoryQueue()
+    enqueued: List[q.QueueItem] = []
+    for variant_id in variant_ids:
+        item = q.QueueItem(
+            variant_id=str(variant_id),
+            trigger=trigger,
+            reason=cause,
+            priority=priority,
+            tenant_id=tenant_id,
+        )
+        if work_queue.enqueue(item):
+            enqueued.append(item)
+    return work_queue, q.build_run_manifest(
+        enqueued,
+        run_id=run_id,
+        trigger_cause=cause,
+    )
 
 
 def variant_id_of(item: Any) -> str:

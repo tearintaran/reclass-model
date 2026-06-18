@@ -98,13 +98,33 @@ CASES = [
 ]
 
 
+def _with_strata(case: dict) -> dict:
+    """Attach the distinct population/VCEP fields (job1 task 5).
+
+    The synthetic ``ancestry`` values are genuine genetic-ancestry groups (European,
+    African, ...), so ``population`` mirrors ``ancestry`` here and ``vcep_group`` is
+    None (this benchmark has no expert-panel grouping). ``ancestry`` is kept for the
+    existing harness.
+    """
+    out = dict(case)
+    out.setdefault("population", case.get("ancestry"))
+    out.setdefault("vcep_group", None)
+    return out
+
+
 def build() -> dict:
     return {
         "benchmark": BENCHMARK_NAME,
         "engine_version": ENGINE_VERSION,
         "note": ("Synthetic, rule-derived benchmark for harness validation only. "
                  "Not a clinical concordance figure."),
-        "cases": CASES,
+        "field_semantics": {
+            "population": "True genetic-ancestry / population-stratification group "
+                          "(mirrors `ancestry` here; these are real ancestries).",
+            "vcep_group": "ClinGen VCEP / expert-panel grouping (None for synthetic).",
+            "ancestry": "Back-compatible alias retained for the existing harness.",
+        },
+        "cases": [_with_strata(c) for c in CASES],
     }
 
 

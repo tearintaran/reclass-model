@@ -116,7 +116,10 @@ def case_evidence(case: dict) -> dict:
     }
     if enrichment is not None:
         flags["enriched"] = True
-        flags["matched"] = bool(enrichment.get("clingen_variation_id_match"))
+        matched = enrichment.get("matched")
+        if matched is None:
+            matched = enrichment.get("clingen_variation_id_match")
+        flags["matched"] = bool(matched)
         flags["providers"] = list(enrichment.get("providers") or [])
     else:
         flags["enriched"] = False
@@ -182,9 +185,10 @@ def class_recall(results: list) -> dict:
 def matched_unmatched_concordance(results: list):
     """Concordance split for enriched fixtures: matched vs unmatched cases.
 
-    A case is *matched* when its evidence was found by enrichment
-    (``enrichment.clingen_variation_id_match``); *unmatched* cases are in the
-    fixture but lack the evidence that would let the engine reproduce the label.
+    A case is *matched* when its evidence was found by any enrichment route
+    (``enrichment.matched``), falling back to the historical direct Variation ID
+    flag for older fixtures. *Unmatched* cases are in the fixture but lack the
+    evidence that would let the engine reproduce the label.
     Returns ``None`` for fixtures without any enrichment metadata (the split is
     not applicable there).
     """

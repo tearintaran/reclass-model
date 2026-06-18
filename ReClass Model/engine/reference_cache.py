@@ -30,6 +30,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 from .reference import FastaReference, ReferenceLookupError
@@ -38,6 +39,10 @@ ENV_FASTA_PATH = "RECLASS_GRCH38_FASTA"
 ENV_FASTA_SHA256 = "RECLASS_GRCH38_SHA256"
 DEFAULT_FASTA_FILENAME = "GRCh38.fa"
 DEFAULT_BUILD = "GRCh38"
+#: Sidecar that records the installed FASTA's source/version/checksum (job1 task 1).
+#: It is small and provenance-only (no genome bases), so it is safe to keep next to
+#: the gitignored FASTA as a tamper-evidence record of exactly what was installed.
+DEFAULT_META_SUFFIX = ".meta.json"
 _READ_CHUNK = 1024 * 1024  # 1 MiB streaming chunks for checksum
 
 
@@ -134,6 +139,64 @@ def file_sha256(path: str) -> str:
     return h.hexdigest()
 
 
+def meta_path_for(fasta_path: str) -> str:
+    """Path of the provenance sidecar for a FASTA (``<fasta>.meta.json``)."""
+    return fasta_path + DEFAULT_META_SUFFIX
+
+
+def read_metadata(meta_path: str) -> Optional[dict]:
+    """Load a recorded provenance sidecar, or None if absent/unreadable."""
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def record_metadata(
+    config: ReferenceCacheConfig,
+    *,
+    source: Optional[str] = None,
+    source_url: Optional[str] = None,
+    version: Optional[str] = None,
+    notes: Optional[str] = None,
+    meta_path: Optional[str] = None,
+) -> dict:
+    """Record the installed FASTA's source/version/checksum to a sidecar (task 1).
+
+    Computes the SHA-256 of the file actually on disk (so the digest is the genome
+    you installed, not a guess), captures its size and an access timestamp, and
+    writes ``<fasta>.meta.json``. This is the "record the FASTA source, version, and
+    a checksum" step -- the whole-genome file stays a local, gitignored cache while
+    this small provenance record can be kept (and pinned via ``RECLASS_GRCH38_SHA256``).
+    Raises :class:`ReferenceLookupError` if the FASTA is not present to checksum.
+    """
+    if not os.path.isfile(config.path):
+        raise ReferenceLookupError(
+            f"cannot record metadata: FASTA not found at {config.path}. Install it first."
+        )
+    digest = file_sha256(config.path)
+    meta = {
+        "build": config.build,
+        "fasta_path": config.path,
+        "fasta_filename": os.path.basename(config.path),
+        "source": source,
+        "source_url": source_url,
+        "version": version,
+        "sha256": digest,
+        "size_bytes": os.path.getsize(config.path),
+        "recorded_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "notes": notes,
+    }
+    target = meta_path or meta_path_for(config.path)
+    with open(target, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return meta
+
+
 def reference_status(config: ReferenceCacheConfig) -> dict:
     """Build a JSON-serializable status report for a configured reference cache.
 
@@ -142,7 +205,9 @@ def reference_status(config: ReferenceCacheConfig) -> dict:
     """
     path = config.path
     fai_path = path + ".fai"
+    meta_path = meta_path_for(path)
     exists = os.path.isfile(path)
+    metadata = read_metadata(meta_path)
 
     status: dict = {
         "path": path,
@@ -153,6 +218,9 @@ def reference_status(config: ReferenceCacheConfig) -> dict:
         "expected_sha256": config.sha256,
         "actual_sha256": None,
         "checksum_match": None,
+        "meta_path": meta_path,
+        "metadata": metadata,
+        "metadata_sha256_match": None,
         "loadable": False,
         "contigs": None,
         "error": None,
@@ -171,6 +239,13 @@ def reference_status(config: ReferenceCacheConfig) -> dict:
     if config.sha256 is not None:
         status["checksum_match"] = (
             status["actual_sha256"].lower() == config.sha256.lower()
+        )
+
+    # Independent cross-check against the recorded provenance sidecar: if a
+    # metadata file pins a checksum, confirm the file on disk still matches it.
+    if metadata and metadata.get("sha256"):
+        status["metadata_sha256_match"] = (
+            status["actual_sha256"].lower() == str(metadata["sha256"]).lower()
         )
 
     try:
@@ -223,6 +298,14 @@ def _format_status(status: dict) -> str:
         f"  loadable        : {mark(status['loadable'])}",
         f"  contigs         : {status['contigs'] if status['contigs'] is not None else 'n/a'}",
     ]
+    meta = status.get("metadata")
+    if meta:
+        lines.append(f"  recorded source : {meta.get('source') or 'n/a'}")
+        lines.append(f"  recorded version: {meta.get('version') or 'n/a'}")
+        lines.append(f"  recorded sha256 : {meta.get('sha256') or 'n/a'}")
+        lines.append(f"  meta matches    : {mark(status.get('metadata_sha256_match'))}")
+    else:
+        lines.append(f"  provenance meta : none ({status.get('meta_path')})")
     if status["error"]:
         lines.append(f"  note            : {status['error']}")
     return "\n".join(lines)
@@ -238,6 +321,10 @@ def main(argv: Optional[list] = None) -> int:
         help="report the status of the configured reference cache",
     )
     parser.add_argument(
+        "--record", action="store_true",
+        help="record the installed FASTA's checksum + provenance to its .meta.json sidecar",
+    )
+    parser.add_argument(
         "--path", default=None,
         help=f"FASTA path (default: ${ENV_FASTA_PATH} or data/reference/"
              f"{DEFAULT_FASTA_FILENAME})",
@@ -249,13 +336,39 @@ def main(argv: Optional[list] = None) -> int:
         "--sha256", default=None,
         help="expected lowercase hex SHA-256 to verify against",
     )
+    parser.add_argument("--source", default=None,
+                        help="(with --record) human-readable FASTA source/distributor")
+    parser.add_argument("--source-url", default=None,
+                        help="(with --record) download URL the FASTA came from")
+    parser.add_argument("--source-version", default=None,
+                        help="(with --record) source release/version label")
+    parser.add_argument("--note", default=None,
+                        help="(with --record) free-text note for the provenance record")
     parser.add_argument(
-        "--json", action="store_true", help="emit the status report as JSON",
+        "--json", action="store_true", help="emit the report as JSON",
     )
     args = parser.parse_args(argv)
-
-    # --status is the only action today; default to it so bare invocation is useful.
     config = _config_from_args(args)
+
+    if args.record:
+        try:
+            meta = record_metadata(
+                config, source=args.source, source_url=args.source_url,
+                version=args.source_version, notes=args.note,
+            )
+        except ReferenceLookupError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(meta, indent=2, sort_keys=True))
+        else:
+            print(f"Recorded provenance -> {meta_path_for(config.path)}")
+            print(f"  source  : {meta.get('source') or 'n/a'}")
+            print(f"  version : {meta.get('version') or 'n/a'}")
+            print(f"  sha256  : {meta['sha256']}")
+        return 0
+
+    # --status is the default action so bare invocation is useful.
     status = reference_status(config)
     if args.json:
         print(json.dumps(status, indent=2, sort_keys=True))
