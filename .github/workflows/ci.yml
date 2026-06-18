@@ -62,16 +62,34 @@ jobs:
           git ls-files -z -- "ReClass Model" \
             | xargs -0 python "ReClass Model/ops/repo_guard.py" --repo-root .
 
+      - name: Generate validation regression reports
+        run: |
+          python validation/harness.py synthetic_v1
+          python validation/harness.py clingen_real_v1
+
+          set +e
+          python validation/harness.py clinvar_real_v1
+          clinvar_raw_status=$?
+          python validation/harness.py clinvar_enriched_v1
+          clinvar_enriched_status=$?
+          set -e
+
+          if [ "$clinvar_raw_status" -ne 2 ]; then
+            echo "Expected clinvar_real_v1 to fail the validation gate with exit code 2; got $clinvar_raw_status" >&2
+            exit 1
+          fi
+          if [ "$clinvar_enriched_status" -ne 2 ]; then
+            echo "Expected clinvar_enriched_v1 to fail the validation gate with exit code 2; got $clinvar_enriched_status" >&2
+            exit 1
+          fi
+
+          python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
+
       - name: Unit and integration tests
         run: python -m unittest discover -s tests -v
 
       - name: Migration apply and restore rehearsal
         run: python -m unittest tests.test_db_migrations -v
-
-      - name: Validation gates
-        run: |
-          python validation/harness.py synthetic_v1
-          python validation/harness.py clingen_real_v1
 
       - name: Generate validation report artifacts
         run: |

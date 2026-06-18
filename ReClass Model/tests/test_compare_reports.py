@@ -480,6 +480,12 @@ class TestLockedRegressionBaselines(unittest.TestCase):
         REPORTS_DIR,
         "comparison_clinvar_real_v1_vs_clinvar_enriched_v1.json",
     )
+    REQUIRED_REPORTS = (
+        CLINGEN,
+        CLINVAR_RAW,
+        CLINVAR_ENRICHED,
+        RAW_VS_ENRICHED,
+    )
 
     PINNED_SERIOUS_IDS = {
         "clingen_real_v1": ["CG-17004", "CG-17010", "CG-43555", "CG-9212"],
@@ -504,6 +510,10 @@ class TestLockedRegressionBaselines(unittest.TestCase):
         report = CR._load_json(path)
         return [case["id"] for case in report["cases"] if case.get("serious")]
 
+    @unittest.skipUnless(
+        all(os.path.exists(path) for path in REQUIRED_REPORTS),
+        "locked real-data regression reports not present",
+    )
     def test_serious_discordance_ids_are_pinned(self):
         self.assertEqual(
             self._serious_ids(self.CLINGEN),
@@ -518,6 +528,10 @@ class TestLockedRegressionBaselines(unittest.TestCase):
             self.PINNED_SERIOUS_IDS["clinvar_enriched_v1"],
         )
 
+    @unittest.skipUnless(
+        all(os.path.exists(path) for path in REQUIRED_REPORTS),
+        "locked real-data regression reports not present",
+    )
     def test_raw_vs_enriched_clinvar_deltas_are_pinned(self):
         comparison = CR._load_json(self.RAW_VS_ENRICHED)
         metrics = comparison["metrics"]
@@ -532,6 +546,10 @@ class TestLockedRegressionBaselines(unittest.TestCase):
         self.assertEqual(coverage["criteria_buckets"]["0"]["delta"], -11970)
         self.assertEqual(coverage["criteria_buckets"]["5+"]["delta"], 2134)
 
+    @unittest.skipUnless(
+        all(os.path.exists(path) for path in REQUIRED_REPORTS),
+        "locked real-data regression reports not present",
+    )
     def test_matched_vs_unmatched_concordance_is_pinned(self):
         enriched = CR._load_json(self.CLINVAR_ENRICHED)
         matched = enriched["metrics"]["matched_unmatched"]["matched"]
