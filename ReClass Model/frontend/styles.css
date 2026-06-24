@@ -322,4 +322,74 @@ dl.kv dd { margin: 0; word-break: break-word; }
   dl.kv { grid-template-columns: 1fr; gap: 0 0.25rem; }
   dl.kv dt { margin-top: 0.35rem; }
   .tab { flex: 1 1 auto; text-align: center; }
+  .wl-filters { flex-direction: column; align-items: stretch; }
 }
+
+/* --------------------------------------------------------------------------- */
+/* Worklist (case queue)                                                       */
+/* --------------------------------------------------------------------------- */
+.wl-metrics { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+.wl-metric {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 4.5rem; padding: 0.4rem 0.6rem; border: 1px solid var(--border);
+  border-radius: 6px; background: rgba(61, 139, 253, 0.06);
+}
+.wl-metric.alert { border-color: var(--danger); background: rgba(240, 113, 120, 0.1); }
+.wl-metric-value { font-size: 1.25rem; font-weight: 700; color: var(--text); }
+.wl-metric-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+
+.wl-filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-bottom: 0.6rem; }
+.wl-filters label { display: flex; flex-direction: column; font-size: 0.78rem; color: var(--muted); gap: 0.2rem; }
+.wl-filters label.checkbox { flex-direction: row; align-items: center; gap: 0.35rem; }
+.wl-filters select, .wl-filters input[type="search"] {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; padding: 0.35rem 0.45rem;
+}
+
+/* Bulk-action bar: appears above the queue when ≥1 case is multi-selected. */
+.wl-bulkbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.wl-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; min-height: 1.6rem; }
+.wl-bulkbar.active {
+  padding: 0.4rem 0.6rem; border: 1px solid var(--accent); border-radius: 6px;
+  background: rgba(61, 139, 253, 0.08);
+}
+.wl-bulk-count { font-size: 0.82rem; font-weight: 600; color: var(--accent); }
+.wl-bulk-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.wl-bulk-group input { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 0.3rem 0.45rem; }
+.wl-bulk-group .wl-actions-label { margin-top: 0; }
+.wl-select { width: 1.6rem; text-align: center !important; }
+
+.wl-queue-table { overflow-x: auto; }
+.wl-queue-table table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.wl-queue-table th, .wl-queue-table td {
+  text-align: left; padding: 0.4rem 0.55rem; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.wl-queue-table th { color: var(--muted); font-weight: 600; }
+.wl-row { cursor: pointer; }
+.wl-row:hover { background: rgba(61, 139, 253, 0.08); }
+
+.wl-chip {
+  display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border); color: var(--muted);
+}
+.wl-chip.status-draft { color: var(--muted); }
+.wl-chip.status-in_review { color: var(--accent); border-color: var(--accent); }
+.wl-chip.status-signed { color: var(--vus); border-color: var(--serious); }
+.wl-chip.status-released { color: var(--success); border-color: var(--success); }
+.wl-chip.status-on_hold { color: var(--serious); border-color: var(--serious); }
+.wl-chip.status-cancelled { color: var(--muted); text-decoration: line-through; }
+.wl-chip.prio-stat { color: var(--danger); border-color: var(--danger); }
+.wl-chip.prio-urgent { color: var(--serious); border-color: var(--serious); }
+.wl-chip.prio-routine { color: var(--muted); }
+.wl-chip.sla-overdue { color: var(--danger); border-color: var(--danger); background: rgba(240, 113, 120, 0.12); }
+.wl-chip.sla-due_soon { color: var(--serious); border-color: var(--serious); }
+.wl-chip.sla-on_track { color: var(--success); }
+
+.wl-detail-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+.wl-detail-meta { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0.4rem 0 0.6rem; font-size: 0.85rem; }
+.wl-detail-meta dt { color: var(--muted); }
+.wl-detail-meta dd { margin: 0; color: var(--text); word-break: break-word; }
+.wl-assign { display: flex; gap: 0.4rem; margin: 0.4rem 0; }
+.wl-assign input { flex: 1 1 auto; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 0.35rem 0.45rem; }
+.wl-actions-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 0.4rem; }
+.wl-transitions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }

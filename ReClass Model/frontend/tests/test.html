@@ -73,13 +73,20 @@
         "classification-region", "classification-raw", "warnings-region",
         "reviewer-region", "reviewer-raw", "signoff-release", "signoff-status",
         "signer", "credential", "draft-region", "alert-region",
+        // Worklist surface
+        "wl-metrics", "wl-queue", "wl-detail", "wl-create-status",
+        "wl-status", "wl-priority", "wl-unassigned", "wl-search",
+        "wl-accession", "wl-new-priority", "wl-provider", "wl-test-code", "wl-mrn",
+        "wl-bulkbar", "wl-bulk-status",
       ];
       const box = document.getElementById("sandbox");
       box.innerHTML = "";
       const inputs = { "chrom": "1", "pos": "100", "ref": "A", "alt": "G", "build": "GRCh38" };
       ids.forEach((id) => {
         const isInput = ["api-base", "tenant-id", "bearer-token", "chrom", "pos",
-          "ref", "alt", "build", "patient-mrn", "signer", "credential"].includes(id);
+          "ref", "alt", "build", "patient-mrn", "signer", "credential",
+          "wl-status", "wl-priority", "wl-unassigned", "wl-search",
+          "wl-accession", "wl-new-priority", "wl-provider", "wl-test-code", "wl-mrn"].includes(id);
         const node = document.createElement(isInput ? "input" : "div");
         node.id = id;
         if (id in inputs) node.value = inputs[id];
@@ -167,6 +174,42 @@
         { alert_id: "a1", variant_key: "GRCh38-1-100-A-G", old_tier: "VUS",
           new_tier: "Likely Pathogenic", serious: true, state: "open" },
       ],
+      worklistMetrics: {
+        total: 3, open: 2, unassigned: 1, due_soon: 1, overdue: 1,
+        by_status: { draft: 1, in_review: 1, signed: 0, released: 1, on_hold: 0, cancelled: 0 },
+        by_priority: { stat: 1, urgent: 1, routine: 1 }, by_sla: {},
+      },
+      worklistCases: [
+        { case_id: "case-1", accession: "ACC-1", status: "in_review", priority: "stat",
+          assigned_to: "sci-7", sla_status: "overdue", due_at: "2026-06-18T00:00:00Z",
+          variant_count: 2, phi_redacted: true },
+        { case_id: "case-2", accession: "ACC-2", status: "draft", priority: "routine",
+          assigned_to: null, sla_status: "on_track", due_at: "2026-07-01T00:00:00Z",
+          variant_count: 0, phi_redacted: false },
+      ],
+      caseDetail: {
+        case_id: "case-1", accession: "ACC-1", status: "in_review", priority: "stat",
+        assigned_to: "sci-7", ordering_provider: "Dr. Order", test_code: "WES",
+        received_at: "2026-06-17T00:00:00Z", due_at: "2026-06-18T00:00:00Z",
+        turnaround_hours: 24.0, variant_count: 2, sla_status: "overdue",
+        phi_redacted: true, patient_mrn: null,
+      },
+      bulkAssignResult: {
+        assigned_to: "lead-1",
+        summary: { requested: 2, succeeded: 2, failed: 0 },
+        results: [
+          { case_id: "case-1", ok: true, assigned_to: "lead-1" },
+          { case_id: "case-2", ok: true, assigned_to: "lead-1" },
+        ],
+      },
+      bulkTransitionResult: {
+        to_status: "on_hold",
+        summary: { requested: 2, succeeded: 1, failed: 1 },
+        results: [
+          { case_id: "case-1", ok: true, status: "on_hold" },
+          { case_id: "case-2", ok: false, error: "illegal", error_code: "rejected" },
+        ],
+      },
     };
 
     function jsonResp(body) {
@@ -191,6 +234,18 @@
       if (p.includes("/report/reviewer")) return Promise.resolve(jsonResp(F.reviewer));
       if (p.includes("/report/summary")) return Promise.resolve(jsonResp(F.summary));
       if (p.includes("/alerts")) return Promise.resolve(jsonResp(F.alerts));
+      if (p.includes("/worklist/metrics")) return Promise.resolve(jsonResp(F.worklistMetrics));
+      if (p.includes("/worklist/cases/bulk/assign")) return Promise.resolve(jsonResp(F.bulkAssignResult));
+      if (p.includes("/worklist/cases/bulk/transition")) return Promise.resolve(jsonResp(F.bulkTransitionResult));
+      if (p.includes("/worklist/cases/") && p.includes("/transition"))
+        return Promise.resolve(jsonResp({ ...F.caseDetail, status: "signed" }));
+      if (/\/worklist\/cases\/[^/?]+$/.test(p) && method === "PATCH")
+        return Promise.resolve(jsonResp({ ...F.caseDetail, assigned_to: "new-user" }));
+      if (/\/worklist\/cases\/[^/?]+$/.test(p) && method === "GET")
+        return Promise.resolve(jsonResp(F.caseDetail));
+      if (p.includes("/worklist/cases") && method === "POST")
+        return Promise.resolve(jsonResp({ ...F.caseDetail, case_id: "case-new", accession: "ACC-NEW" }));
+      if (p.includes("/worklist/cases")) return Promise.resolve(jsonResp(F.worklistCases));
       return Promise.resolve(jsonResp(null));
     }
 
@@ -354,6 +409,106 @@
       assert("empty state: no drafts -> draft region empty", document.getElementById("draft-region").dataset.state === "empty");
       await R.listAlerts();
       assert("empty state: no alerts -> alert region empty", document.getElementById("alert-region").dataset.state === "empty");
+
+      // === 13. Worklist (case queue) ===================================== //
+      buildSandbox();
+      R.renderWorklistMetrics(document.getElementById("wl-metrics"), F.worklistMetrics);
+      assert("worklist: metrics render five chips", document.querySelectorAll("#wl-metrics .wl-metric").length === 5);
+      assert("worklist: overdue metric is flagged", !!document.querySelector("#wl-metrics .wl-metric.alert"));
+
+      let selected = null;
+      R.renderWorklistQueue(document.getElementById("wl-queue"), F.worklistCases, (id) => { selected = id; });
+      assert("worklist: queue renders a row per case", document.querySelectorAll("#wl-queue tbody tr").length === 2);
+      assert("worklist: queue shows status + SLA chips",
+        !!document.querySelector("#wl-queue .wl-chip.status-in_review") && !!document.querySelector("#wl-queue .sla-overdue"));
+      assert("worklist: de-identified queue shows no MRN", !txt(document.getElementById("wl-queue")).toLowerCase().includes("mrn"));
+      document.querySelector("#wl-queue tbody tr").click();
+      assert("worklist: clicking a row selects its case", selected === "case-1");
+
+      R.renderWorklistQueue(document.getElementById("wl-queue"), [], null);
+      assert("worklist: empty queue shows empty state", document.getElementById("wl-queue").dataset.state === "empty");
+
+      R.renderCaseDetail(document.getElementById("wl-detail"), F.caseDetail);
+      assert("worklist: detail shows the accession", txt(document.getElementById("wl-detail")).includes("ACC-1"));
+      assert("worklist: detail offers only legal transitions",
+        document.querySelectorAll("#wl-detail .wl-transitions button").length === R.WL_TRANSITIONS["in_review"].length);
+      assert("worklist: detail flags redacted PHI", txt(document.getElementById("wl-detail")).includes("redacted"));
+
+      buildSandbox();
+      document.getElementById("wl-status").value = "draft";
+      document.getElementById("wl-search").value = "ACC";
+      assert("worklist: query string includes active filters", R.worklistQuery() === "?status=draft&q=ACC");
+      document.getElementById("wl-status").value = "";
+      document.getElementById("wl-search").value = "";
+      assert("worklist: query string empty when no filters", R.worklistQuery() === "");
+
+      buildSandbox();
+      R.setFetch(mockFetch);
+      resetState();
+      await R.loadWorklist();
+      assert("worklist: loadWorklist renders metrics + queue",
+        document.querySelectorAll("#wl-metrics .wl-metric").length === 5 && document.querySelectorAll("#wl-queue tbody tr").length === 2);
+
+      document.getElementById("wl-accession").value = "ACC-NEW";
+      document.getElementById("wl-new-priority").value = "routine";
+      await R.createCase();
+      assert("worklist: createCase reports success", txt(document.getElementById("wl-create-status")).includes("Created case"));
+
+      buildSandbox();
+      R.setFetch(mockFetch);
+      await R.selectCase("case-1");
+      assert("worklist: selectCase renders the case detail", txt(document.getElementById("wl-detail")).includes("ACC-1"));
+
+      // === 14. Worklist bulk actions (multi-select) ====================== //
+      buildSandbox();
+      R.wlSelected.clear();
+      let bulkSelected = null;
+      R.renderWorklistQueue(document.getElementById("wl-queue"), F.worklistCases, (id) => { bulkSelected = id; });
+      assert("bulk: queue has a select-all + per-row checkbox column",
+        document.querySelectorAll("#wl-queue .wl-select input").length === 3);
+      assert("bulk: nothing selected -> bulk bar shows the prompt",
+        txt(document.getElementById("wl-bulkbar")).includes("Select cases"));
+
+      // Checking a row box selects that case without triggering the row's onSelect.
+      const firstBox = document.querySelector("#wl-queue tbody .wl-select input");
+      firstBox.click();
+      assert("bulk: checking a row selects its case", R.wlSelected.has("case-1"));
+      assert("bulk: checking a box does not open the case", bulkSelected === null);
+      assert("bulk: one selection -> bar shows count", txt(document.getElementById("wl-bulkbar")).includes("1 selected"));
+
+      // Select-all selects every visible case.
+      const selectAll = document.querySelector("#wl-queue thead .wl-select input");
+      selectAll.click();
+      assert("bulk: select-all selects every case", R.wlSelected.size === 2);
+
+      // Common transitions across in_review (case-1) + draft (case-2):
+      // intersection of their legal next-states is [on_hold, cancelled].
+      const common = R.wlCommonTransitions(F.worklistCases, ["case-1", "case-2"]);
+      assert("bulk: common transitions are the intersection", common.join(",") === "on_hold,cancelled");
+      assert("bulk: bar offers only the common transitions",
+        document.querySelectorAll("#wl-bulkbar .wl-bulk-group button").length >= 2
+        && txt(document.getElementById("wl-bulkbar")).includes("On hold")
+        && !txt(document.getElementById("wl-bulkbar")).includes("Signed"));
+      assert("bulk: bar offers an assign control", !!document.getElementById("wl-bulk-assignee"));
+
+      // Bulk assign reports the per-case summary and clears the selection.
+      buildSandbox();
+      R.setFetch(mockFetch);
+      R.wlSelected.clear();
+      R.wlSelected.add("case-1"); R.wlSelected.add("case-2");
+      await R.bulkAssign("lead-1");
+      assert("bulk: assign reports the success count",
+        txt(document.getElementById("wl-bulk-status")).includes("Assigned 2 cases"));
+      assert("bulk: assign clears the selection", R.wlSelected.size === 0);
+
+      // Bulk transition surfaces partial failure.
+      R.wlSelected.add("case-1"); R.wlSelected.add("case-2");
+      await R.bulkTransition("on_hold");
+      assert("bulk: transition reports moved + failed counts",
+        txt(document.getElementById("wl-bulk-status")).includes("Moved to On hold")
+        && txt(document.getElementById("wl-bulk-status")).includes("1 failed"));
+      assert("bulk: partial failure flags the status line as an error",
+        document.getElementById("wl-bulk-status").className.includes("err"));
     } catch (e) {
       assert("harness ran without throwing: " + (e && e.message), false);
       // eslint-disable-next-line no-console

@@ -30,6 +30,16 @@ class Alert:
         return f"{sev}{self.direction}: {self.old_tier} -> {self.new_tier} ({self.steps} step(s))"
 
 
+@dataclass(frozen=True)
+class SameTierChange:
+    old_tier: str
+    new_tier: str
+    old_points: float
+    new_points: float
+    delta_points: float
+    alert: bool = False
+
+
 def _validate(tier: str) -> None:
     if tier not in _RANK:
         raise ValueError(f"unknown tier: {tier!r} (expected one of {TIER_ORDER})")
@@ -58,4 +68,24 @@ def diff(old_tier: str, new_tier: str) -> Optional[Alert]:
         direction="upgrade" if steps > 0 else "downgrade",
         steps=abs(steps),
         serious=is_serious_crossing(old_tier, new_tier),
+    )
+
+
+def same_tier_audit(
+    old_tier: str,
+    new_tier: str,
+    old_points: float,
+    new_points: float,
+) -> Optional[SameTierChange]:
+    """Return audit metadata for same-tier point/evidence changes; never alerts."""
+    _validate(old_tier)
+    _validate(new_tier)
+    if old_tier != new_tier or old_points == new_points:
+        return None
+    return SameTierChange(
+        old_tier=old_tier,
+        new_tier=new_tier,
+        old_points=float(old_points),
+        new_points=float(new_points),
+        delta_points=float(new_points) - float(old_points),
     )

@@ -23,6 +23,21 @@ When BA1/BS1 conflicts with curated pathogenic or likely pathogenic evidence:
 | 5 | Review curated pathogenic evidence independently; do not let a prior label substitute for evidence. |
 | 6 | If the conflict remains unresolved, hold the classification at `review_pending` or VUS until a credentialed reviewer records a disposition. |
 
+## Structured dispositions
+
+Release-gate sign-off packets record one normalized conflict-policy disposition:
+
+| Disposition | Release effect |
+|---|---|
+| `no_conflict` | Clears release when no relevant policy conflict is present. |
+| `resolved` | Clears release after reviewer adjudication resolves the conflict. |
+| `exception_signed` | Clears release for a signed variant-specific exception. |
+| `accepted_with_rationale` | Clears release only with documented reviewer rationale. |
+| `unresolved` | Blocks release. |
+| `rejected` | Blocks release. |
+
+Any missing or unknown disposition blocks `approved_for_release`.
+
 ## Founder-frequency exceptions
 
 Founder exceptions are allowed only as explicit per-variant approvals. A valid

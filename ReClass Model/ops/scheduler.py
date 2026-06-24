@@ -23,6 +23,7 @@ psycopg/PostgreSQL:
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from engine import config as C
@@ -51,6 +52,47 @@ SOURCE_SNAPSHOT_CHANGED = "source_snapshot_changed"    # source checksum/version
 CONFLICT_POLICY_CHANGED = "conflict_policy_changed"    # conflict-policy config changed
 NO_EVIDENCE = "no_evidence"                            # nothing to score -> skip
 NOT_APPLICABLE = "not_applicable"                      # rule/condition not applicable -> skip
+
+
+@dataclass(frozen=True)
+class TenantReanalysisPolicy:
+    """Tenant-level reanalysis policy for scheduled operations."""
+
+    cadence: str = "monthly"
+    included_sources: Tuple[str, ...] = ("clinvar", "clingen", "gnomad", "revel")
+    affected_scope: Dict[str, Any] = field(default_factory=dict)
+    escalation_thresholds: Dict[str, Any] = field(default_factory=lambda: {
+        "serious_crossing": "critical",
+        "tier_crossing": "high",
+        "failed_items": 1,
+    })
+    retention: Dict[str, Any] = field(default_factory=lambda: {
+        "run_reports_days": 2555,
+        "queue_terminal_days": 365,
+    })
+    enabled: bool = True
+
+    @classmethod
+    def from_dict(cls, raw: Optional[Dict[str, Any]]) -> "TenantReanalysisPolicy":
+        raw = raw or {}
+        return cls(
+            cadence=str(raw.get("cadence", "monthly")),
+            included_sources=tuple(str(source) for source in raw.get("included_sources", cls().included_sources)),
+            affected_scope=dict(raw.get("affected_scope") or {}),
+            escalation_thresholds=dict(raw.get("escalation_thresholds") or cls().escalation_thresholds),
+            retention=dict(raw.get("retention") or cls().retention),
+            enabled=bool(raw.get("enabled", True)),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "cadence": self.cadence,
+            "included_sources": list(self.included_sources),
+            "affected_scope": dict(self.affected_scope),
+            "escalation_thresholds": dict(self.escalation_thresholds),
+            "retention": dict(self.retention),
+            "enabled": self.enabled,
+        }
 
 
 # --------------------------------------------------------------------------- #
@@ -300,3 +342,54 @@ def run_from_queue(
     if persist:
         rr.finalize_run(cur, run_id, report)
     return report
+
+
+def upsert_tenant_policy(
+    cur,
+    *,
+    tenant_id: str,
+    policy: TenantReanalysisPolicy,
+) -> Dict[str, Any]:
+    """Persist a tenant reanalysis policy."""
+    from psycopg.types.json import Jsonb
+
+    cur.execute(
+        """
+        INSERT INTO clinical.reanalysis_policy (
+            tenant_id, cadence, included_sources, affected_scope,
+            escalation_thresholds, retention, enabled, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+        ON CONFLICT (tenant_id) DO UPDATE
+           SET cadence = EXCLUDED.cadence,
+               included_sources = EXCLUDED.included_sources,
+               affected_scope = EXCLUDED.affected_scope,
+               escalation_thresholds = EXCLUDED.escalation_thresholds,
+               retention = EXCLUDED.retention,
+               enabled = EXCLUDED.enabled,
+               updated_at = now()
+        RETURNING *
+        """,
+        (
+            tenant_id,
+            policy.cadence,
+            Jsonb(list(policy.included_sources)),
+            Jsonb(policy.affected_scope),
+            Jsonb(policy.escalation_thresholds),
+            Jsonb(policy.retention),
+            policy.enabled,
+        ),
+    )
+    return cur.fetchone()
+
+
+def get_tenant_policy(cur, *, tenant_id: str) -> Dict[str, Any]:
+    """Return a tenant policy row, or the default policy if none is stored."""
+    cur.execute(
+        "SELECT * FROM clinical.reanalysis_policy WHERE tenant_id = %s",
+        (tenant_id,),
+    )
+    row = cur.fetchone()
+    if row is not None:
+        return row
+    policy = TenantReanalysisPolicy()
+    return {"tenant_id": tenant_id, **policy.to_dict()}

@@ -3,6 +3,12 @@
 ReClass output is a draft classification until a credentialed human reviewer
 approves it. Engine output alone is never clinically releasable.
 
+Implementation status as of 2026-06-19: the release gate is enforced as
+structured workflow state. The gate evaluator blocks approval when required
+packet fields are missing, signed clinical scope is inactive or out of scope,
+provider/reference preflight fails, conflict disposition is unresolved, or a
+relevant serious discordance remains unresolved.
+
 ## Minimum release gates
 
 A draft classification may become clinically releasable only when all gates pass:
@@ -27,6 +33,31 @@ A draft classification may become clinically releasable only when all gates pass
 | `approved_for_release` | Credentialed reviewer signed the classification and all gates passed. | Yes |
 | `released` | Approved classification has been transmitted through the lab's release workflow. | Yes |
 | `withdrawn` | Approval was revoked because evidence, identity, scope, or policy changed. | No new release; prior recipients require local correction workflow. |
+| `re-review_required` | A release trigger invalidated approval and the classification must return to review. | No new release until re-approved. |
+
+Allowed transitions are:
+
+`review_pending → approved_for_release → released`; `approved_for_release` and
+`released` may move to `re-review_required` or `withdrawn`; `re-review_required`
+may return to `review_pending` after the packet is rebuilt.
+
+## Required sign-off packet
+
+The enforced packet must carry:
+
+- active clinical scope covering variant, gene, disease, and evidence class;
+- config hash and commit;
+- source snapshots;
+- validation-report id;
+- conflict-policy disposition;
+- reviewer credential and institution/lab authorization;
+- effective date and re-review date;
+- reviewer assignment, second reviewer when required, override rationale, and
+  release notes when applicable.
+
+The exportable validation packet for a scoped release bundles config hash, source
+snapshots, benchmark metrics, serious-discordance disposition, and the reviewer
+sign-off ledger.
 
 ## Required reviewer checks
 

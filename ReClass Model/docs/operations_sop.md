@@ -25,6 +25,11 @@ Trigger reanalysis when any of the following change:
 Use `ops/scheduler.py` trigger detection helpers to identify affected variants,
 then enqueue work via `ops/queue.py`.
 
+Each tenant must have a reanalysis policy covering cadence, included sources,
+affected scope, escalation thresholds, and retention. The default policy is
+monthly, includes ClinVar/ClinGen/gnomAD/REVEL, escalates serious crossings as
+critical, and retains run reports for seven years unless local policy overrides it.
+
 ### Dry run (no database)
 
 Load a manifest and execute in memory:
@@ -42,9 +47,11 @@ items = queue.load_manifest('path/to/manifest.json')
 1. Enqueue variants: `ops.queue.enqueue(cur, tenant_id=..., variant_id=..., trigger='provider_version', reason='gnomAD 4.1')`
 2. Execute: `ops.scheduler.run_from_queue(cur, tenant_id=..., resolve_events=...)`
 3. Read the run report from `clinical.reanalysis_run` or the returned `RunReport`
-4. Triage **crossed** outcomes first (tier changes → alerts)
-5. Review **failed** items by `last_reason_code` (missing cache, invalid identity, etc.)
-6. **Skipped** items with `no_evidence` may need manual evidence curation
+4. Review operator views for queue state, run manifests, failed/skipped reason
+   codes, provider-cache readiness, and same-tier changes
+5. Triage **crossed** outcomes first (tier changes → alerts)
+6. Review **failed** items by `last_reason_code` (missing cache, invalid identity, etc.)
+7. **Skipped** items with `no_evidence` may need manual evidence curation
 
 ### Expected outcomes
 
@@ -80,6 +87,15 @@ open → acknowledged → in_review → resolved
 
 Illegal transitions return HTTP 409. All state changes are audit-logged.
 
+Triage metadata must be filled before resolution:
+
+- owner;
+- SLA due date;
+- severity (`low`, `standard`, `high`, `critical`);
+- resolution rationale;
+- re-review outcome;
+- notification state (`not_required`, `pending`, `sent`, `acknowledged`, `failed`).
+
 ## 3. Credentialed sign-off
 
 A persisted classification starts as a **draft** (`is_draft: true`). It is not
@@ -92,9 +108,12 @@ clinically releasable until sign-off.
 3. Persist draft (`POST /classifications`)
 4. Open technical reviewer report (`GET /classifications/{id}/report/reviewer`)
 5. Verify criteria contributions, provenance, and any reanalysis history
-6. Sign off (`POST /classifications/{id}/sign-off`) with credentialed name and optional credential ID
+6. Build/review the release gate packet (`/validation/release-gate`)
+7. Approve release only after all blockers clear
 
-Sign-off is recorded in the audit log with actor, timestamp, and signer identity.
+Sign-off is recorded in the audit log with actor, timestamp, signer identity,
+active scope, config hash, commit, source snapshots, validation-report id,
+conflict disposition, credential, authorization, effective date, and re-review date.
 
 ### Policy gates (local lab must define)
 
@@ -121,7 +140,22 @@ released **after** credentialed sign-off.
 - Open serious alert on the same variant without documented resolution
 - Known evidence gaps flagged in reviewer report warnings
 
-## 5. Audit and retention
+## 5. Amended FHIR reports and clinician notification
+
+Amended reports use the FHIR outbound adapter around the signed classification.
+Each lifecycle record tracks report id, previous report id, amended/final state,
+amendment reason, payload hash, and notification state. Clinician notifications
+track recipient, channel, state, and rationale.
+
+For LIS/EHR workflows:
+
+1. Render the final outbound FHIR payload and archive its SHA-256.
+2. On amendment, render a new payload with `previous_report_id` and amendment
+   reason.
+3. Create clinician notification rows for intended recipients.
+4. Update notification state as delivery/acknowledgement occurs.
+
+## 6. Audit and retention
 
 Operational audit entries (`GET /audit`) cover:
 
@@ -129,12 +163,17 @@ Operational audit entries (`GET /audit`) cover:
 - `classification.sign_off`
 - `alert.state_change`
 - `reanalysis.run`
+- `reanalysis.policy_update`
+- `classification.release_approved`
+- `classification.release_state_change`
+- `alert.triage_update`
+- `report.amended`
 
 Retain audit logs per institutional policy (recommended minimum: 7 years for
 clinical genomics). Database retention is configured at the PostgreSQL level;
 in-memory audit is for development only.
 
-## 6. Incident response
+## 7. Incident response
 
 | Symptom | Likely cause | Action |
 |---|---|---|

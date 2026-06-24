@@ -32,9 +32,12 @@ from reporting.fhir import (  # noqa: E402
     GENE_STUDIED_LOINC,
     TIER_TO_LOINC,
     amend_outbound_payload,
+    amended_report_record,
     build_outbound_payload,
+    clinician_notification_record,
     diagnostic_report,
     genomics_report_bundle,
+    lis_ehr_lifecycle_adapter,
     molecular_sequence,
     replay_outbound_payload,
     to_json,
@@ -321,6 +324,36 @@ class OutboundPayloadTests(unittest.TestCase):
     def test_invalid_amendment_transition_is_named(self):
         with self.assertRaisesRegex(ValueError, "illegal report state transition"):
             transition_report_state("draft", "amended")
+
+    def test_lis_ehr_lifecycle_adapter_tracks_amended_report_and_notifications(self):
+        clf = classify(_events_for_tier("Pathogenic"))
+        outbound = build_outbound_payload(
+            clf,
+            variant_key=_KEY,
+            report_id="report-2",
+            state="amended",
+            previous_report_id="report-1",
+            amendment_reason="new curated evidence",
+            signer="Dr. Reviewer",
+        )
+        report = amended_report_record(outbound, classification_id="c1")
+        self.assertEqual(report["state"], "amended")
+        self.assertEqual(report["previous_report_id"], "report-1")
+
+        notification = clinician_notification_record(
+            classification_id="c1",
+            report_id="report-2",
+            recipient="clinician@example.test",
+        )
+        self.assertEqual(notification["notification_state"], "pending")
+
+        lifecycle = lis_ehr_lifecycle_adapter(
+            outbound,
+            classification_id="c1",
+            recipients=["clinician@example.test"],
+        )
+        self.assertEqual(lifecycle["report"]["report_id"], "report-2")
+        self.assertEqual(len(lifecycle["notifications"]), 1)
 
 
 class BundleStructureTests(unittest.TestCase):

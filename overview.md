@@ -27,6 +27,22 @@ but **a credentialed clinical reviewer has not yet signed them off**, and no out
 is releasable to a patient until that and the other gates in
 [`roadmap.md`](roadmap.md) are met.
 
+Latest project review: **2026-06-19**. Local checks showed the proof-of-concept
+engine and service scaffold are stable: 877 tests passed, `ruff` and scoped `mypy`
+passed, the reviewer frontend browser harness passed 52/52 checks, and the local
+GRCh38 cache was loadable with matching metadata. Thirty-one PostgreSQL-backed
+storage/RLS tests skipped locally because no PostgreSQL server was running; the CI
+workflow is configured to run PostgreSQL-backed checks.
+
+The 2026-06-19 review also defined and the project has since **built** a
+scalable-product feature layer on top of the engine: an evidence workbench and
+evidence-coverage operations, enforced release-gate sign-off, continuous-reanalysis
+operations, enterprise deployment/security hardening, and customer-facing
+integration surfaces. These features make the engine usable, governable, and
+supportable at scale; they do **not** change the scoring math and do **not** remove
+the clinical, regulatory, data-licensing, and credentialed-sign-off gates that
+remain in [`roadmap.md`](roadmap.md) and [`gap.md`](gap.md).
+
 ---
 
 ## What ReClass Does
@@ -50,10 +66,14 @@ The same engine can run four ways:
 1. **As a calculator** — feed it structured evidence and read the tier and receipt.
 2. **As a validation harness** — replay it across thousands of benchmark variants
    and measure how well it reproduces expert reference labels.
-3. **As a small clinical-style service** — resolve evidence, classify, persist a
-   draft, generate reviewer and patient-safe reports, capture credentialed
-   sign-off, and continuously re-flag variants when evidence changes, all through
-   an API and a clinician-facing reviewer web page.
+3. **As a clinical-style operations service** — resolve evidence, classify, persist
+   a draft, capture reviewer-entered evidence in an **evidence workbench**, see
+   **evidence-coverage** and **curation** queues, import variants and evidence in
+   bulk, generate reviewer and patient-safe reports, enforce a structured
+   **release-gate sign-off**, export a **validation packet**, continuously re-flag
+   variants when evidence changes, triage the resulting alerts, track amended
+   reports and clinician notifications, and deliver outbound webhooks — all through
+   an API, a clinician-facing reviewer web page, and an evidence-workbench page.
 4. **As a command-line tool** — a `reclass` operator command classifies a single
    variant, runs a validation benchmark, checks the reference-genome cache,
    compares before/after benchmark runs, runs calibration, and regenerates the
@@ -152,6 +172,86 @@ ReClass currently supports:
   enqueue the affected variants together with an auditable run manifest that records
   the trigger cause and a run id.
 
+**Evidence workbench, coverage, and import**
+
+- An **evidence workbench** where a reviewer or upstream pipeline enters structured
+  ACMG/AMP evidence the public scores do not encode — `PVS1`/loss-of-function,
+  `PS3`/`BS3` functional assays, `PM3` phasing, `PP1`/`BS4` segregation, `PP4`
+  phenotype/HPO matching, `PS4` cohort/case-control, and `BA1`/`BS1` benign-frequency
+  review. Each entry is persisted with full provenance: reviewer identity and
+  credential, source and source version, a content checksum, the access date, an
+  active/expired/superseded/withdrawn status, and an expiry / re-review date. Entries
+  are kept in the de-identified research domain and flow into scoring as standard
+  evidence events.
+- **Evidence-coverage dashboards** that measure, for each case, which evidence
+  categories are present versus the categories its variant class should have, mark a
+  case **blocked** when a blocking category (loss-of-function, functional,
+  segregation, case-control, phasing) is missing, and roll the result up by gene,
+  VCEP, disease, variant class, and provider so operators can see where missing
+  evidence is concentrated.
+- **Curation queues** that surface evidence problems needing human triage rather
+  than missing data: unmatched or ambiguous source identity, a transcript-dependent
+  criterion with no named transcript, a `PS4` claim with no cohort denominator, and
+  variants carrying both pathogenic and benign evidence. Each item has a kind,
+  severity, and an open / in-review / resolved / dismissed state.
+- **Validated batch and file import.** Upstream functional, phenotype, family,
+  cohort, and lab evidence can be bulk-imported through the existing adapters with
+  patient identifiers scrubbed before anything reaches the research tables, and
+  **VCF/CSV/TSV variant import** normalizes identity, splits multiallelic sites,
+  left-aligns indels, detects duplicates, optionally previews evidence resolution,
+  and returns a **dry-run report** before anything is persisted.
+
+**Release governance and reanalysis operations**
+
+- An enforced **release-gate state machine** with explicit states
+  `review_pending`, `approved_for_release`, `released`, `withdrawn`, and
+  `re-review_required`, with validated transitions between them.
+- Structured **sign-off packets** that must carry the signed clinical scope, engine/
+  config hash, code commit, source snapshots, validation-report id, conflict-policy
+  disposition, reviewer credential, institutional authorization, effective date, and
+  re-review date. Sign-off is **blocked** when the variant/gene/disease/evidence
+  class is out of the signed scope, when a required field or preflight check fails,
+  when the active config hash does not match the packet, or when a relevant serious
+  pathogenic/benign discordance is still unresolved.
+- An **exportable validation/release packet** that bundles the validation-report id,
+  release scope, config hash, source snapshots, benchmark metrics, the
+  serious-discordance disposition, and the full sign-off ledger under a deterministic
+  packet id.
+- **Reanalysis operator views** exposing queue status, run manifests (checked,
+  unchanged, same-tier, crossed, failed, skipped), failed/skipped reason codes,
+  provider-cache readiness, and same-tier changes, plus per-tenant **reanalysis
+  policies** (cadence, included sources, affected scope, escalation thresholds, and
+  retention).
+- An **alert-triage workflow** in which each tier-crossing alert carries an owner, an
+  SLA due date, a severity (low/standard/high/critical), a resolution rationale, a
+  re-review outcome, and a notification state, and moves through open / acknowledged
+  / in-review / resolved / dismissed states.
+- **Amended-report and clinician-notification tracking** around the FHIR Genomics
+  serializer (draft → final → amended), with an LIS/EHR amended-report lifecycle
+  adapter and a notification roster (recipient, channel, state).
+
+**Platform, security, and integration**
+
+- A **fail-closed production preflight** that refuses to start unless required
+  prerequisites pass — environment configuration, OIDC/JWKS, persistent audit
+  backend, database role and row-level-security policies, reference-FASTA metadata,
+  provider-cache manifests, and a consistent migration ledger — and a readiness/
+  health report that surfaces the same checks.
+- A **production auth mode** that accepts only RS256/JWKS OIDC bearer tokens and
+  disables the HS256 JWT and static API-key fallbacks.
+- **Rate limiting**, **request-size limits**, an **audit-retention policy**, and
+  **structured security events** recorded in the audit log.
+- **Service-level-objective metrics** for API latency, provider-cache freshness,
+  reanalysis lag, failed evidence resolution, alert backlog, and restore-test
+  freshness, exposed for scraping.
+- A **webhook delivery subsystem** with endpoint registration, HMAC-signed payloads,
+  retry with backoff, and delivery tracking for tier crossings, source-snapshot
+  updates, configuration changes, and completed reanalysis runs.
+- **Tenant administration and onboarding** tools (tenant records, source-cache
+  setup, reference-cache verification, OIDC setup checks, a sample-data smoke test,
+  and a pre-production readiness report), plus a **typed client generated from the
+  pinned OpenAPI contract** and a customer-facing API cookbook.
+
 **Validation and governance**
 
 - Validation on synthetic, ClinGen, raw ClinVar, and ClinVar-plus-ClinGen
@@ -211,12 +311,49 @@ ReClass still does **not** provide:
 
 ---
 
+## Productization Direction
+
+The 2026-06-19 review reframed the scalable-product path — ReClass should be an
+evidence-backed variant reclassification operations platform, not just a scoring
+engine — and the code-actionable backlog for that reframe is now **built and
+tested** (it is no longer a todo list). It was organized around five feature areas,
+all delivered:
+
+- **Evidence workbench and evidence operations** — done: reviewer-entered structured
+  evidence for missing `PVS1`/`PS3`/`PM3`, `BA1`/`BS1`, phenotype, segregation,
+  phasing, functional, and cohort evidence, with coverage dashboards and curation
+  queues (see *Evidence workbench, coverage, and import* above).
+- **Release-gate workflow hardening** — done: credentialed sign-off now enforces the
+  release policy as a structured, five-state machine with validated sign-off packets.
+- **Continuous reanalysis operations** — done: queues, run manifests, alert
+  ownership/SLA/severity, amended-report tracking, notification workflow, and
+  per-tenant reanalysis policies.
+- **Enterprise deployment and security** — done: fail-closed production preflight,
+  OIDC-only production auth, rate/request limits, audit retention, tenant
+  administration, and SLO metrics.
+- **Integration surfaces** — done: LIS/EHR amended-report adapter around the FHIR
+  Genomics serializer, VCF/CSV/batch import, an OpenAPI-generated client, a webhook
+  delivery subsystem, exportable validation packets, and tenant-onboarding readiness
+  checks.
+
+These features make the existing engine usable at scale, but they do not remove
+the need for intended-use definition, clinical validation, data licensing,
+regulatory strategy, and credentialed human accountability. The remaining work is
+tracked in [`gap.md`](gap.md) and the staged pathway in [`roadmap.md`](roadmap.md).
+
+---
+
 ## Input Model
 
 ReClass can operate on benchmark records or future clinical/research records. A
 record may contain direct ACMG criteria, source signals that can be converted into
 criteria, or both. The reviewer always supplies (or confirms) the evidence; ReClass
-arranges and scores it.
+arranges and scores it. In the operations service, evidence enters either case by
+case through the **evidence workbench** (with reviewer, source-version, checksum,
+access-date, and re-review provenance) or in bulk through the **batch / VCF / CSV
+import** surfaces, which normalize identity and scrub patient identifiers before any
+de-identified evidence is stored. The inputs below are what a record can carry,
+regardless of which channel delivered it.
 
 | Input | What It Means | How ReClass Uses It |
 |---|---|---|
@@ -330,18 +467,25 @@ signed review.
 
 ReClass models a clinician-in-the-loop workflow rather than autonomous reporting:
 
-1. **Resolve evidence** for a variant from the configured providers.
-2. **Classify** the assembled evidence to produce a tier and receipt.
-3. **Persist a draft** classification, tied to a tenant.
-4. **Review** the draft using the technical reviewer report.
-5. **Sign off** as a credentialed reviewer — only this step can move a draft toward
-   a releasable state.
-6. **Triage alerts** raised when reanalysis crosses a tier boundary.
+1. **Capture evidence** the public sources do not encode using the evidence
+   workbench, and review the coverage and curation queues to see what is missing or
+   ambiguous.
+2. **Resolve evidence** for a variant from the configured providers.
+3. **Classify** the assembled evidence to produce a tier and receipt.
+4. **Persist a draft** classification, tied to a tenant.
+5. **Review** the draft using the technical reviewer report.
+6. **Clear the release gate and sign off** as a credentialed reviewer with a
+   structured sign-off packet — only this step can move a draft toward a releasable
+   state, and the gate blocks it if scope, preflight, conflict policy, or an
+   unresolved serious discordance is not satisfied.
+7. **Triage alerts** raised when reanalysis crosses a tier boundary, and track any
+   amended report and clinician notification that results.
 
 A browser-based reviewer application (served at `/reviewer/` when the service runs)
-walks a reviewer through exactly this loop by calling the API. Authentication,
-role-based permissions (viewer, reviewer, operator, administrator), and audit
-logging gate who can resolve, classify, sign off, or change alert state. These are
+and a companion evidence-workbench page (`/reviewer/workbench.html`) walk a reviewer
+through exactly this loop by calling the API. Authentication, role-based permissions
+(viewer, reviewer, operator, administrator), and audit logging gate who can resolve,
+classify, enter evidence, sign off, or change alert state. These are
 proof-of-concept service surfaces intended to demonstrate the workflow, not a
 validated production deployment.
 
@@ -393,7 +537,18 @@ For operations and validation, ReClass can produce:
 - Reanalysis run reports showing checked, unchanged, same-tier changed,
   tier-crossing, failed, and skipped cases.
 - Tier-crossing alerts and same-tier audit history.
-- Audit-log entries for sign-off, alert state changes, and reanalysis actions.
+- Audit-log entries for sign-off, alert state changes, reanalysis actions, and
+  structured security events.
+- Evidence-coverage summaries and roll-ups (by gene, VCEP, disease, variant class,
+  and provider) and curation-queue items.
+- VCF/CSV/batch **dry-run import reports** (normalized identity, duplicates, and an
+  optional evidence-resolution preview) before anything is persisted.
+- An exportable **validation/release packet** bundling config hash, source
+  snapshots, benchmark metrics, serious-discordance disposition, and the sign-off
+  ledger.
+- Reanalysis operator views, per-tenant reanalysis policies, alert-triage records,
+  amended-report and clinician-notification state, service-level-objective metrics,
+  and signed outbound webhook deliveries.
 
 ---
 
@@ -413,7 +568,7 @@ of biological truth or clinical accuracy.
 The key scientific lesson is that the same scoring engine performs well when it
 receives complete expert-applied evidence and poorly when the evidence is sparse.
 The main blocker is evidence completeness and evidence quality, not threshold
-loosening. The internal test suite (781 automated tests) is green in this
+loosening. The internal test suite (877 automated tests) is green in this
 environment.
 
 ---
@@ -461,10 +616,12 @@ unmatched or still lack the full evidence expert reviewers use.
 The database model separates two domains:
 
 - `clinical`: tenant-scoped, identified clinical data such as patients,
-  classifications, sign-off fields, alerts, audit-log entries, and reanalysis
-  records.
+  classifications, sign-off/release-gate fields, alerts and their triage state,
+  audit-log entries, reanalysis records and policies, evidence-coverage roll-ups,
+  curation-queue items, amended-report and notification state, tenant
+  administration, and webhook endpoints/deliveries.
 - `research`: de-identified variant evidence, evidence bundles, source records,
-  and cohort counts.
+  cohort counts, and reviewer-entered workbench evidence.
 
 Research tables intentionally carry no patient or tenant identifiers and no foreign
 key back to the clinical schema. Tenant isolation and the clinical/research

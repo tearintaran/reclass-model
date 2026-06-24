@@ -380,6 +380,98 @@ class ReanalysisResult:
     alert_id: Optional[str] = None
 
 
+def operator_queue_view(queue_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize durable queue rows for operator views."""
+    counts: Dict[str, int] = {}
+    reason_codes: Dict[str, int] = {}
+    failed_or_skipped = []
+    for row in queue_rows:
+        state = str(row.get("state") or "pending")
+        counts[state] = counts.get(state, 0) + 1
+        code = row.get("last_reason_code") or row.get("reason_code")
+        if code:
+            reason_codes[str(code)] = reason_codes.get(str(code), 0) + 1
+        if state in {"failed", "skipped"}:
+            failed_or_skipped.append({
+                "queue_id": row.get("queue_id"),
+                "variant_id": row.get("variant_id"),
+                "state": state,
+                "reason_code": code,
+                "error": row.get("last_error"),
+            })
+    return {
+        "total": len(queue_rows),
+        "by_state": counts,
+        "reason_codes": reason_codes,
+        "failed_or_skipped": failed_or_skipped,
+    }
+
+
+def operator_run_manifests(run_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return compact run manifests with counts and deterministic reason codes."""
+    manifests = []
+    for row in run_rows:
+        detail = list(row.get("detail") or [])
+        reason_codes: Dict[str, int] = {}
+        for outcome in detail:
+            code = outcome.get("reason_code") if isinstance(outcome, dict) else None
+            if code:
+                reason_codes[str(code)] = reason_codes.get(str(code), 0) + 1
+        manifests.append({
+            "run_id": row.get("run_id"),
+            "trigger": row.get("trigger"),
+            "started_at": row.get("started_at"),
+            "finished_at": row.get("finished_at"),
+            "checked": row.get("checked", 0),
+            "unchanged": row.get("unchanged", 0),
+            "same_tier": row.get("same_tier", 0),
+            "crossed": row.get("crossed", 0),
+            "failed": row.get("failed", 0),
+            "skipped": row.get("skipped", 0),
+            "reason_codes": reason_codes,
+        })
+    return manifests
+
+
+def same_tier_changes(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return audited reanalysis changes that did not create alerts."""
+    return [
+        dict(event)
+        for event in events
+        if not event.get("crossed") and event.get("old_tier") == event.get("new_tier")
+    ]
+
+
+def provider_cache_readiness(
+    manifests: List[Dict[str, Any]],
+    *,
+    required_sources: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Summarize provider-cache readiness from manifest-like dicts."""
+    required = set(required_sources or [])
+    by_source: Dict[str, Dict[str, Any]] = {}
+    for manifest in manifests:
+        source = str(manifest.get("source") or manifest.get("provider") or "unknown")
+        ready = bool(
+            manifest.get("ready", True)
+            and (manifest.get("sha256") or manifest.get("checksum") or manifest.get("version"))
+        )
+        by_source[source] = {
+            "ready": ready,
+            "version": manifest.get("version") or manifest.get("source_version"),
+            "sha256": manifest.get("sha256") or manifest.get("checksum"),
+            "path": manifest.get("path"),
+        }
+    missing = sorted(source for source in required if source not in by_source)
+    not_ready = sorted(source for source, row in by_source.items() if not row["ready"])
+    return {
+        "ready": not missing and not not_ready,
+        "sources": by_source,
+        "missing": missing,
+        "not_ready": not_ready,
+    }
+
+
 def reanalyze(
     cur,
     *,
@@ -468,6 +560,7 @@ def reanalyze(
         trigger=trigger, alert_id=alert_id,
         prior_bundle_id=prior_bundle_id, new_bundle_id=new_bundle_id,
     )
+    # webhook-seam: emit reanalysis.changed; include tier_crossed/alert_id when crossed.
     return ReanalysisResult(
         changed=True, crossed=crossed, old_tier=old_tier, new_tier=new_clf.tier,
         old_points=old_points, new_points=new_clf.total_points,

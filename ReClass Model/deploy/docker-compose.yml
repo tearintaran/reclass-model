@@ -46,5 +46,27 @@ services:
       sh -c "python db/apply.py reclass_dev &&
              python -m uvicorn api.app:app --host 0.0.0.0 --port 8000"
 
+  test:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    profiles: ["test"]
+    environment:
+      RECLASS_API_ENV: development
+      RECLASS_DB: reclass_dev
+      RECLASS_AUDIT_BACKEND: db
+      RECLASS_JWT_SECRET: dev-secret-change-in-production
+      DATABASE_URL: postgresql://reclass:reclass_dev@db:5432/reclass_dev
+      PGHOST: db
+      PGUSER: reclass
+      PGPASSWORD: reclass_dev
+      PGDATABASE: reclass_dev
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python db/apply.py reclass_dev &&
+             python -m unittest discover -s tests -v"
+
 volumes:
   reclass_pgdata:

@@ -26,6 +26,7 @@ original design, not as available files.
 | 11 | Security, privacy, and tenancy | `security-agent` | `db/schema.sql` RLS policies, `storage/db.py`, `tests/test_storage.py`, `.gitignore`, `ops/repo_guard.py`, `docs/data_governance.md`, `api/auth.py`, `api/authz.py`, `api/oidc.py`, `api/audit.py`, `api/observability.py` | RLS, tenant isolation, research-boundary tests, source-governance docs, and commit hygiene guard implemented, plus a proof-of-concept API hardening layer: RS256/JWKS OIDC, HS256 JWT + API-key auth, RBAC, audit logging, and `/health` + `/metrics` observability |
 | 12 | Validation gate, failure analysis, and concordance harness | `validation-agent` | `validation/`, `tests/`, `../plots/` | Harness, failure analysis (including per-case serious-discordance drill-down and adjudication with release-blocking status), single-command analytical-validation report with VCEP/gene/disease/population/variant-class scoped gates, development/validation/holdout fixture splits with an anti-leakage guardrail, configurable conflict-policy checks, reviewer review packets, comparison reports, locked regression baselines, calibration reports, diagnostic plots, and tests implemented |
 | 13 | Roadmap | `roadmap-agent` | `../gap.md` | Unfinished todo list |
+| 14 | Scalable product feature layer | `product` | `evidence/workbench.py`, `evidence/coverage.py`, `evidence/curation.py`, `ingest/batch_import.py`, `ingest/vcf_import.py`, `ingest/csv_import.py`, `validation/signoff.py`, `validation/release_gate.py`, `validation/release_packet.py`, `ops/onboarding.py`, `api/ratelimit.py`, `api/webhooks.py`, `api/generated_client.py`, `api/routers/admin.py`, `api/routers/webhooks.py`, `storage/admin.py`, `storage/webhooks.py`, `deploy/migrations/003`–`005`, `frontend/workbench.*`, `docs/evidence_workbench.md` | Built and tested (2026-06-19): evidence workbench/coverage/curation and batch/VCF/CSV import; five-state release-gate sign-off, exportable validation packets, reanalysis operator views, alert triage, amended-report/notification tracking; fail-closed preflight, OIDC-only auth, rate/request limits, audit retention, SLO metrics, webhook delivery, tenant administration/onboarding, and a generated OpenAPI client. Software complete; real-evidence population, credentialed sign-off, data licensing, and production rollout remain (see `../gap.md`) |
 
 ## Validation gates
 
@@ -46,7 +47,7 @@ Expected current outcomes:
 
 | Gate | Expected result | Meaning |
 |---|---|---|
-| Unit/integration tests | 781 tests passing in the current environment | Engine, evidence providers (including upstream adapters, cache manifests, identity routes), normalization, reference cache, API/reporting/FHIR/contract/cookbook, monitoring, ops/reanalysis with change-control triggers, validation/calibration/analytical-validation/conflict-policy/fixture-splits/review-packets, comparison and regression-baseline reports, CLI, preflight checks, gate logic, storage/RLS/reconstruction, governance, and bundle-provenance tests |
+| Unit/integration tests | 877 tests passing in the current environment | Engine, evidence providers (including upstream adapters, cache manifests, identity routes), normalization, reference cache, API/reporting/FHIR/contract/cookbook, monitoring, ops/reanalysis with change-control triggers, validation/calibration/analytical-validation/conflict-policy/fixture-splits/review-packets, comparison and regression-baseline reports, CLI, preflight checks, gate logic, storage/RLS/reconstruction, governance, bundle-provenance tests, and the scalable-product feature layer (evidence workbench/coverage/curation, batch/VCF/CSV import, release-gate sign-off, validation packets, reanalysis operations, alert triage, webhooks, tenant admin/onboarding, rate limiting) |
 | Synthetic validation | PASS | Harness and scoring plumbing are working |
 | ClinGen real validation | PASS | Complete expert-applied criteria reproduce VCEP calls well |
 | Raw ClinVar validation | FAIL | Sparse public evidence exposes missing evidence integration |
@@ -80,6 +81,14 @@ Implemented and tested:
   Genomics export.
 - Operational reanalysis queue, scheduler, run reports, and retry/error handling.
 - Data-governance docs, commit policy, and repo guard.
+- The scalable-product feature layer: evidence workbench/coverage/curation,
+  PHI-scrubbing batch import and VCF/CSV variant import with dry-run reports, the
+  five-state release-gate sign-off machine with structured packets and exportable
+  validation packets, reanalysis operator views and per-tenant policies, alert
+  triage and amended-report/notification tracking, fail-closed/OIDC-only platform
+  security with rate limiting and audit retention, SLO metrics, the signed webhook
+  delivery subsystem, tenant administration/onboarding, and a generated OpenAPI
+  client.
 
 Implemented but still narrow:
 

@@ -43,7 +43,7 @@ Current upstream versions checked during the environment audit:
 
 `ReClass Model/requirements.txt` pins the active storage dependency
 (`psycopg[binary]`) and diagnostic plotting (`matplotlib`). The API component
-keeps FastAPI/uvicorn/httpx in `ReClass Model/api/requirements.txt`.
+keeps FastAPI/uvicorn/httpx2 in `ReClass Model/api/requirements.txt`.
 
 ## Project Python Environment
 
@@ -70,7 +70,8 @@ Installed packages in the active venv:
 | `h11` | 0.16.0 | HTTP protocol dependency |
 | `httpcore` | 1.0.9 | httpx dependency |
 | `httptools` | 0.8.0 | uvicorn optional dependency |
-| `httpx` | 0.28.1 | API tests / Starlette TestClient |
+| `httpx` | 0.28.1 | HTTP client dependency |
+| `httpx2` | 2.4.0 | API tests / Starlette TestClient |
 | `idna` | 3.18 | HTTP dependency |
 | `kiwisolver` | 1.5.0 | matplotlib dependency |
 | `matplotlib` | 3.11.0 | diagnostic plots |
@@ -189,11 +190,13 @@ Validated from `ReClass Model/` with the rebuilt `.venv`:
 
 Results:
 
-- Unit/integration suite: 781 tests, all passing. Rechecked 2026-06-17 with
-  `../.venv/bin/python -m unittest discover -s tests -v`.
-- Ruff: `../.venv/bin/python -m ruff check .` passed. Rechecked 2026-06-17.
-- Mypy: `../.venv/bin/python -m mypy` passed for the configured engine gate.
-  Rechecked 2026-06-17.
+- Unit/integration suite: 877 tests, all passing (31 PostgreSQL-backed storage/RLS
+  tests skip without a local server). Rechecked 2026-06-19 with
+  `../.venv/bin/python -m unittest discover -s tests -v` after the scalable-product
+  feature layer landed (was 781 tests on 2026-06-17).
+- Ruff: `../.venv/bin/python -m ruff check .` passed. Rechecked 2026-06-19.
+- Mypy: `../.venv/bin/python -m mypy` passed for the configured scope (44 source
+  files). Rechecked 2026-06-19.
 - Synthetic benchmark: GATE PASS, 92.9% definitive concordance, 0 serious
   discordances, 93.8% overall exact concordance. Rechecked 2026-06-17.
 - ClinGen real benchmark: GATE PASS, 94.7% definitive concordance, 4 serious

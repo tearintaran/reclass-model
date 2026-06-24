@@ -25,8 +25,11 @@ from .reviewer import build_reviewer_report
 from .summary import build_patient_summary
 from .render import render_reviewer_markdown, render_patient_summary_markdown
 from .fhir import (
+    amended_report_record,
+    clinician_notification_record,
     diagnostic_report,
     genomics_report_bundle,
+    lis_ehr_lifecycle_adapter,
     molecular_sequence,
     to_json,
     variant_observation,
@@ -37,8 +40,11 @@ __all__ = [
     "build_patient_summary",
     "render_reviewer_markdown",
     "render_patient_summary_markdown",
+    "amended_report_record",
+    "clinician_notification_record",
     "diagnostic_report",
     "genomics_report_bundle",
+    "lis_ehr_lifecycle_adapter",
     "molecular_sequence",
     "to_json",
     "variant_observation",

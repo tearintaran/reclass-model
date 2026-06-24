@@ -21,10 +21,12 @@ from engine import config as C
 
 from .audit import DbAuditLog, InMemoryAuditLog
 from .evidence_resolver import EvidenceResolver
-from .observability import RequestMetrics, StructuredLoggingMiddleware
-from .settings import Settings, get_settings, preflight_check, require_preflight
+from .observability import RequestMetrics, StructuredLoggingMiddleware, collect_slo_gauges
+from .ratelimit import RateLimitMiddleware, RequestSizeLimitMiddleware
+from .settings import Settings, get_settings, readiness_report, require_preflight
 from .store import ClinicalStore, DbClinicalStore
 from .routers import (
+    admin,
     alerts,
     audit as audit_router,
     classifications,
@@ -33,6 +35,8 @@ from .routers import (
     reanalysis,
     reports,
     validation,
+    webhooks,
+    worklist,
 )
 
 
@@ -71,12 +75,56 @@ def _build_audit_log(settings: Settings):
     return InMemoryAuditLog(max_entries=settings.audit_max_entries)
 
 
+def _build_admin_store(settings: Settings):
+    if settings.audit_backend.strip().lower() == "db":
+        from storage.admin import DbTenantAdminStore
+
+        return DbTenantAdminStore(db_name=settings.db_name)
+    from storage.admin import InMemoryTenantAdminStore
+
+    return InMemoryTenantAdminStore()
+
+
+def _build_webhook_store(settings: Settings):
+    if settings.audit_backend.strip().lower() == "db":
+        from storage.webhooks import DbWebhookStore
+
+        return DbWebhookStore(db_name=settings.db_name, role=settings.db_role)
+    from storage.webhooks import InMemoryWebhookStore
+
+    return InMemoryWebhookStore()
+
+
+def _build_workbench_store(settings: Settings):
+    if settings.audit_backend.strip().lower() == "db":
+        from evidence.workbench import DbWorkbenchStore
+
+        return DbWorkbenchStore(db_name=settings.db_name, role=settings.db_role)
+    from evidence.workbench import InMemoryWorkbenchStore
+
+    return InMemoryWorkbenchStore()
+
+
+def _build_worklist_store(settings: Settings):
+    if settings.audit_backend.strip().lower() == "db":
+        from worklist.case import DbWorklistStore
+
+        return DbWorklistStore(db_name=settings.db_name, role=settings.db_role)
+    from worklist.case import InMemoryWorklistStore
+
+    return InMemoryWorklistStore()
+
+
 def create_app(
     *,
     settings: Optional[Settings] = None,
     store: Optional[ClinicalStore] = None,
     resolver: Optional[EvidenceResolver] = None,
     audit_log=None,
+    admin_store=None,
+    webhook_store=None,
+    workbench_store=None,
+    worklist_store=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=logging.INFO)
@@ -91,18 +139,34 @@ def create_app(
 
     metrics = RequestMetrics()
     app.state.settings = settings
+    app.state.base_path = Path(__file__).resolve().parent.parent
     app.state.store = store or DbClinicalStore(
         db_name=settings.db_name, role=settings.db_role
     )
     app.state.resolver = resolver if resolver is not None else build_default_resolver()
     app.state.audit_log = audit_log or _build_audit_log(settings)
+    app.state.admin_store = admin_store or _build_admin_store(settings)
+    app.state.webhook_store = webhook_store or _build_webhook_store(settings)
+    app.state.workbench_store = workbench_store or _build_workbench_store(settings)
+    app.state.worklist_store = worklist_store or _build_worklist_store(settings)
     app.state.metrics = metrics
 
     app.add_middleware(StructuredLoggingMiddleware, metrics=metrics)
+    if settings.rate_limit_per_minute:
+        app.add_middleware(
+            RateLimitMiddleware,
+            requests_per_minute=settings.rate_limit_per_minute,
+        )
+    if settings.request_size_limit_bytes:
+        app.add_middleware(
+            RequestSizeLimitMiddleware,
+            max_bytes=settings.request_size_limit_bytes,
+        )
 
     for module in (
+        admin,
         evidence, classify, classifications, reanalysis, alerts,
-        validation, reports, audit_router,
+        validation, reports, audit_router, webhooks, worklist,
     ):
         app.include_router(module.router)
 
@@ -117,26 +181,34 @@ def create_app(
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:
+        readiness = readiness_report(
+            settings,
+            base_path=Path(__file__).resolve().parent.parent,
+        )
         return {
             "status": "ok",
             "engine_version": C.ENGINE_VERSION,
             "environment": settings.environment,
             "requests_total": metrics.requests_total,
+            "preflight_status": readiness["status"],
+            "readiness": readiness["checks"],
         }
 
     @app.get("/health/preflight", tags=["meta"])
     def preflight() -> dict:
-        failures = preflight_check(
+        return readiness_report(
             settings,
             base_path=Path(__file__).resolve().parent.parent,
         )
-        return {
-            "status": "ok" if not failures else "failed",
-            "failures": [failure.to_dict() for failure in failures],
-        }
 
     @app.get("/metrics", tags=["meta"])
     def metrics_endpoint() -> PlainTextResponse:
+        for name, value in collect_slo_gauges(
+            settings,
+            store=app.state.store,
+            base_path=Path(__file__).resolve().parent.parent,
+        ).items():
+            metrics.set_gauge(name, value)
         return PlainTextResponse(metrics.prometheus_text(), media_type="text/plain")
 
     @app.exception_handler(RuntimeError)

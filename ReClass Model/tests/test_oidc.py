@@ -220,6 +220,19 @@ class TestAuthIntegration(unittest.TestCase):
         user = auth.authenticate_bearer(hs, settings)
         self.assertEqual(user.tenant_id, "t-9")
 
+    def test_oidc_auth_mode_disables_hs256_fallback(self):
+        from fastapi import HTTPException
+
+        settings = self._settings(jwt_secret="devsecret", auth_mode="oidc")
+        hs = auth.issue_jwt(
+            user_id="dev",
+            tenant_id="t-9",
+            roles=["reviewer"],
+            secret="devsecret",
+        )
+        with self.assertRaises(HTTPException):
+            auth.authenticate_bearer(hs, settings)
+
     def test_invalid_token_rejected_with_401(self):
         from fastapi import HTTPException
         with self.assertRaises(HTTPException):

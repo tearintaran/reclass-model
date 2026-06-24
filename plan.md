@@ -27,18 +27,21 @@ policy, and generated benchmark reports. It is not a finished clinical product.
 | `ReClass Model/validation/` | Fixtures, harness, failure analysis, comparison tool, calibration reports, plots, and generated reports |
 | `ReClass Model/ingest/` | ClinGen, ClinVar, REVEL, and targeted gnomAD benchmark builders |
 | `ReClass Model/storage/` + `ReClass Model/db/` | PostgreSQL schema, apply tool, tenant/RLS storage layer, evidence-bundle persistence, cohort counts, and reconstruction verifier |
-| `ReClass Model/ops/` | Reanalysis queue, scheduler, run reports, and repo guard (wired as the `.git/hooks/pre-commit` hook) |
-| `ReClass Model/api/auth.py`, `authz.py`, `audit.py`, `observability.py` | JWT/API-key auth, RBAC, audit log, and `/health` + `/metrics` |
-| `ReClass Model/frontend/` | Static clinician reviewer UI served at `/reviewer/` |
-| `ReClass Model/deploy/` | Containerized deployment plus backup/restore scripts: `Dockerfile`, `docker-compose.yml`, `backup.sh`, `restore.sh` |
-| `ReClass Model/docs/` | Governance, clinical review, release policy, conflict handling, operations SOP, deployment, auth, and release review docs |
+| `ReClass Model/ops/` | Reanalysis queue, scheduler, run reports, repo guard (wired as the `.git/hooks/pre-commit` hook), and tenant onboarding |
+| `ReClass Model/api/auth.py`, `authz.py`, `audit.py`, `observability.py`, `ratelimit.py`, `webhooks.py` | JWT/API-key + OIDC auth, RBAC, audit log/retention/security events, `/health` + `/metrics` SLO metrics, rate/request limits, and the webhook delivery subsystem |
+| `ReClass Model/evidence/workbench.py`, `coverage.py`, `curation.py` | Reviewer evidence workbench, evidence-coverage roll-ups, and curation queues |
+| `ReClass Model/ingest/batch_import.py`, `vcf_import.py`, `csv_import.py` | PHI-scrubbing upstream-evidence batch import and VCF/CSV variant import with dry-run reports |
+| `ReClass Model/validation/signoff.py`, `release_gate.py`, `release_packet.py` | Five-state release-gate sign-off, scope/preflight/discordance blocking, and exportable validation packets |
+| `ReClass Model/frontend/` | Static clinician reviewer UI at `/reviewer/` plus the evidence-workbench page (`workbench.html`) |
+| `ReClass Model/deploy/` | Containerized deployment plus backup/restore scripts and the migration ledger: `Dockerfile`, `docker-compose.yml`, `backup.sh`, `restore.sh`, `migrations/001`–`005` |
+| `ReClass Model/docs/` | Governance, clinical review, release policy, conflict handling, operations SOP, deployment, auth, release review, API cookbook, and evidence-workbench docs |
 | `ReClass Model/cli.py` | Operator CLI (`reclass`) wrapping classify, validate, reference status, compare, calibration, and report regeneration |
-| `ReClass Model/tests/` | 781 tests in the current environment |
+| `ReClass Model/tests/` | 877 tests in the current environment |
 | `plots/` | PNG diagnostics generated from validation reports |
 
 Verified status:
 
-- Unit/integration suite: 781 tests passing in the current environment.
+- Unit/integration suite: 877 tests passing in the current environment.
 - Synthetic validation: PASS, 92.9% definitive concordance.
 - ClinGen real validation: PASS, 94.7% definitive concordance.
 - Raw ClinVar validation: expected FAIL, 5.0% definitive concordance.
@@ -111,13 +114,13 @@ cd "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model"
 Expected current result:
 
 ```text
-Ran 781 tests
+Ran 877 tests
 OK
 ```
 
 PostgreSQL/RLS integration tests skip cleanly if a database is not reachable. In
 the current audited environment PostgreSQL and `psycopg` are available, so the full
-781-test suite executes.
+877-test suite executes.
 
 ## 5. Run validation
 
@@ -339,6 +342,23 @@ Implemented surfaces include:
 - `POST /validation/run` in development mode
 - `GET /classifications/{id}/report/reviewer`
 - `GET /classifications/{id}/report/summary`
+
+The scalable-product feature layer adds further surfaces, including:
+
+- Evidence workbench/coverage/curation: `GET/POST /evidence/workbench/evidence`,
+  `GET /evidence/workbench/criteria`, `GET/POST /evidence/coverage`,
+  `POST /evidence/curation/scan`, `GET /evidence/curation`.
+- Import: `POST /evidence/import/preview` (VCF/CSV dry-run),
+  `POST /evidence/import/batch` (PHI-scrubbed upstream evidence).
+- Release gate: `POST /validation/release-gate`,
+  `POST /validation/release-gate/{id}/approve`,
+  `POST /validation/release-gate/{id}/state`, `POST /validation/release-packet`.
+- Reanalysis operations: `GET /reanalysis/operator-view`, `GET/POST /reanalysis/policy`.
+- Alert triage: `POST /alerts/{id}/triage`.
+- Amended FHIR report: `POST /classifications/{id}/report/fhir/amended`.
+- Platform/admin: `POST/GET /admin/tenants`, `GET /admin/tenants/{id}/readiness`,
+  `POST/GET /webhooks/endpoints`, `POST /webhooks/events`,
+  `GET /audit/retention`, `POST /audit/retention/apply`, `POST /audit/security-events`.
 
 Deterministic FHIR Genomics export is implemented in `reporting/fhir.py` and
 covered by `tests/test_fhir.py`, including draft → final → amended report state

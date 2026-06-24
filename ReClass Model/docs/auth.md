@@ -9,11 +9,20 @@ carries a `tenant_id`, and PostgreSQL row-level security scopes all clinical dat
 | Environment | Behavior |
 |---|---|
 | `development` | Legacy `X-Tenant-Id` header accepted when no Bearer token is present. Grants configurable default roles (default: `reviewer`). |
-| `staging` / `production` | **Bearer token required.** `X-Tenant-Id` alone is rejected. |
+| `staging` | Bearer token required unless you explicitly construct development settings for local tests. |
+| `production` | **Bearer token required.** Environment-built settings default to `RECLASS_AUTH_MODE=oidc`, which accepts only RS256/JWKS OIDC tokens. `X-Tenant-Id` alone is rejected. |
 
 ## Bearer tokens
 
-Three token types are supported:
+`RECLASS_AUTH_MODE` controls fallback behavior:
+
+- `oidc`: accept only RS256/JWKS OIDC bearer tokens. HS256 JWT and API-key
+  fallback are disabled even if `RECLASS_JWT_SECRET` or `RECLASS_API_KEYS` are
+  set.
+- `auto`: try OIDC first when configured, then HS256 JWT, then static API keys.
+  Use this for development or tightly controlled non-production automation.
+
+Three token types are available when the mode allows them:
 
 ### 1. OIDC / JWKS JWT (RS256)
 
@@ -43,7 +52,8 @@ Set `RECLASS_JWT_SECRET`. Tokens must include:
 ```
 
 Issue tokens from your identity provider or use the test helper
-`api.auth.issue_jwt()` for local tooling. Prefer RS256/JWKS OIDC for production.
+`api.auth.issue_jwt()` for local tooling. This path is disabled when
+`RECLASS_AUTH_MODE=oidc`.
 
 ### 3. Static API keys
 
@@ -62,6 +72,8 @@ Set `RECLASS_API_KEYS` to a JSON object:
 
 Send: `Authorization: Bearer my-service-key-abc123`
 
+This path is disabled when `RECLASS_AUTH_MODE=oidc`.
+
 ## Roles and permissions
 
 | Role | Capabilities |
@@ -74,6 +86,7 @@ Send: `Authorization: Bearer my-service-key-abc123`
 Permission strings checked at the router layer include
 `classification:read`, `classification:write`, `classification:sign_off`,
 `alert:read`, `alert:write`, `reanalysis:run`, `audit:read`, `classify:preview`,
+`audit:write`, `tenant:admin`, `webhook:admin`, `webhook:emit`,
 `evidence:resolve`, and `validation:run`.
 
 ## Tenant header consistency
@@ -84,9 +97,14 @@ must match the header. A mismatch returns HTTP 403.
 ## Audit trail
 
 Sign-off, alert state changes, classification creation, and reanalysis runs
-are appended to the operational audit log (`GET /audit`). Configure
-`RECLASS_AUDIT_BACKEND=db` in production and apply
-`deploy/migrations/001_audit_log.sql`.
+are appended to the operational audit log (`GET /audit`). Structured security
+events are recorded as `security.*` actions through `POST /audit/security-events`.
+Configure `RECLASS_AUDIT_BACKEND=db` in production and apply the ordered
+migrations.
+
+Audit retention is policy-driven: configure `RECLASS_AUDIT_RETENTION_DAYS` and
+apply it explicitly with `POST /audit/retention/apply` from an operator/admin
+session. Do not prune production audit logs without the lab's retention approval.
 
 ## Environment variables
 
@@ -96,11 +114,28 @@ are appended to the operational audit log (`GET /audit`). Configure
 | `RECLASS_OIDC_AUDIENCE` | (empty) | Expected JWT audience when set |
 | `RECLASS_OIDC_JWKS_URL` | (empty) | Identity-provider JWKS endpoint |
 | `RECLASS_OIDC_JWKS` | `{}` | Static/pinned JWKS JSON for tests or air-gapped deploys |
+| `RECLASS_AUTH_MODE` | `oidc` in prod, else `auto` | Token fallback mode |
 | `RECLASS_JWT_SECRET` | (empty) | HS256 signing secret |
 | `RECLASS_API_KEYS` | `{}` | Static API key map (JSON) |
 | `RECLASS_LEGACY_ROLES` | `reviewer` | Roles for dev header-only sessions |
 | `RECLASS_AUDIT_BACKEND` | `memory` | `memory` or `db` |
+| `RECLASS_AUDIT_RETENTION_DAYS` | `365` | Audit retention age for explicit pruning |
 | `RECLASS_AUDIT_MAX_ENTRIES` | `10000` | In-memory audit retention cap |
+
+## Secret and JWKS Rotation Runbook
+
+1. Prefer IdP-managed JWKS rotation with stable `RECLASS_OIDC_JWKS_URL`. The
+   verifier refetches on TTL expiry and on unknown `kid`, rate-limited to avoid
+   hammering the provider.
+2. For pinned `RECLASS_OIDC_JWKS`, deploy the new key set before the IdP starts
+   signing with the new key. Keep the old key until all previously issued tokens
+   expire.
+3. Record a `security.jwks_rotation` or `security.secret_rotation` audit event
+   with the operator, change ticket, old/new key IDs, and validation outcome.
+4. Verify `/health/preflight` after rotation. In production, a missing issuer,
+   missing JWKS, or non-`oidc` auth mode fails preflight.
+5. For any emergency HS256/API-key use, switch only a non-production environment
+   to `RECLASS_AUTH_MODE=auto`. Production should remain `oidc`.
 
 ## Frontend session
 

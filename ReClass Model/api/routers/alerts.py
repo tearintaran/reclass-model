@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ..auth import UserContext
 from ..authz import require_permission
 from ..deps import get_audit_log, get_store, get_tenant_from_user
-from ..schemas import AlertStateRequest
+from ..schemas import AlertStateRequest, AlertTriageRequest
 from ..store import ClinicalStore
 from ..audit import AuditLog
 
@@ -63,6 +63,41 @@ def set_alert_state(
         detail={
             "old_state": prior.get("state") if prior else None,
             "new_state": req.state,
+        },
+    )
+    return updated
+
+
+@router.post("/alerts/{alert_id}/triage")
+def set_alert_triage(
+    alert_id: str,
+    req: AlertTriageRequest,
+    tenant_id: str = Depends(get_tenant_from_user),
+    user: UserContext = Depends(require_permission("alert:write")),
+    store: ClinicalStore = Depends(get_store),
+    audit: AuditLog = Depends(get_audit_log),
+) -> Dict[str, Any]:
+    try:
+        updated = store.update_alert_triage(
+            tenant_id=tenant_id,
+            alert_id=alert_id,
+            triage=req.model_dump(exclude_none=True),
+        )
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="alert not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    audit.append(
+        tenant_id=tenant_id,
+        actor_id=user.user_id,
+        action="alert.triage_update",
+        resource_type="alert",
+        resource_id=alert_id,
+        detail={
+            "owner": updated.get("triage_owner"),
+            "severity": updated.get("severity"),
+            "notification_state": updated.get("notification_state"),
         },
     )
     return updated

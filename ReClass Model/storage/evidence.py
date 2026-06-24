@@ -12,6 +12,7 @@ resolved magnitude, so re-running the engine reproduces the exact
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from psycopg.types.json import Jsonb
@@ -348,3 +349,262 @@ def get_cohort_counts(cur, variant_key: str) -> List[Dict[str, Any]]:
         (variant_key,),
     )
     return cur.fetchall()
+
+
+# --------------------------------------------------------------------------- #
+# Reviewer/pipeline-entered evidence (job1 task 1) -- de-identified, research  #
+# --------------------------------------------------------------------------- #
+def _jsonify(value: Any) -> Any:
+    """Coerce uuid/date/datetime values to JSON-friendly strings (recursively)."""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return [_jsonify(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _jsonify(v) for k, v in value.items()}
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
+
+
+_REVIEWER_EVIDENCE_COLUMNS = (
+    "reviewer_evidence_id, variant_key, acmg_criterion, direction, applied_strength, "
+    "points, source, source_version, source_url, checksum, checksum_algorithm, "
+    "access_date, reviewer, reviewer_credential, status, notes, entered_at, "
+    "expires_at, re_review_at"
+)
+
+
+def _reviewer_evidence_row(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if row is None:
+        return None
+    out = {k: _jsonify(v) for k, v in dict(row).items()}
+    out["evidence_direction"] = out.get("direction")
+    out["points"] = None if out.get("points") is None else float(out["points"])
+    out["is_expired"] = out.get("status") == "expired"
+    return out
+
+
+def insert_reviewer_evidence(cur, evidence: Any) -> Dict[str, Any]:
+    """Persist one reviewer-entered :class:`evidence.workbench.ReviewerEvidence`.
+
+    The de-identified ``research.variant`` row is upserted first (FK target); the
+    research/clinical boundary stays intact (no patient/tenant identifier is written).
+    Returns the stored row with the assigned id and server-set ``entered_at``.
+    """
+    parsed = parse_public_variant_key(evidence.variant_key)
+    if parsed is None:
+        raise ValueError(
+            f"reviewer evidence variant_key {evidence.variant_key!r} is not a coordinate key"
+        )
+    chrom, pos, ref, alt = parsed
+    upsert_research_variant(cur, variant_key=evidence.variant_key,
+                            chrom=chrom, pos=pos, ref=ref, alt=alt)
+    cur.execute(
+        f"""
+        INSERT INTO research.reviewer_evidence (
+            variant_key, acmg_criterion, direction, applied_strength, points,
+            source, source_version, source_url, checksum, checksum_algorithm,
+            access_date, reviewer, reviewer_credential, status, notes,
+            expires_at, re_review_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING {_REVIEWER_EVIDENCE_COLUMNS}
+        """,
+        (
+            evidence.variant_key, evidence.acmg_criterion, evidence.evidence_direction,
+            evidence.applied_strength, evidence.points, evidence.source,
+            evidence.source_version, evidence.source_url, evidence.checksum,
+            evidence.checksum_algorithm, evidence.access_date, evidence.reviewer,
+            evidence.reviewer_credential, evidence.status, evidence.notes,
+            evidence.expires_at, evidence.re_review_at,
+        ),
+    )
+    row = _reviewer_evidence_row(cur.fetchone())
+    assert row is not None
+    return row
+
+
+def list_reviewer_evidence(cur, *, variant_key: Optional[str] = None,
+                           status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Reviewer-entered evidence rows, optionally filtered by variant/status."""
+    clauses: List[str] = []
+    params: List[Any] = []
+    if variant_key is not None:
+        clauses.append("variant_key = %s")
+        params.append(variant_key)
+    if status is not None:
+        clauses.append("status = %s")
+        params.append(status)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    cur.execute(
+        f"SELECT {_REVIEWER_EVIDENCE_COLUMNS} FROM research.reviewer_evidence"
+        f"{where} ORDER BY variant_key, entered_at, reviewer_evidence_id",
+        tuple(params),
+    )
+    return [r for r in (_reviewer_evidence_row(row) for row in cur.fetchall()) if r is not None]
+
+
+def get_reviewer_evidence(cur, reviewer_evidence_id: str) -> Optional[Dict[str, Any]]:
+    cur.execute(
+        f"SELECT {_REVIEWER_EVIDENCE_COLUMNS} FROM research.reviewer_evidence "
+        "WHERE reviewer_evidence_id = %s",
+        (reviewer_evidence_id,),
+    )
+    return _reviewer_evidence_row(cur.fetchone())
+
+
+def set_reviewer_evidence_status(cur, reviewer_evidence_id: str,
+                                 status: str) -> Dict[str, Any]:
+    cur.execute(
+        f"UPDATE research.reviewer_evidence SET status = %s "
+        f"WHERE reviewer_evidence_id = %s RETURNING {_REVIEWER_EVIDENCE_COLUMNS}",
+        (status, reviewer_evidence_id),
+    )
+    row = _reviewer_evidence_row(cur.fetchone())
+    if row is None:
+        raise LookupError(f"reviewer evidence {reviewer_evidence_id} not found")
+    return row
+
+
+def expire_reviewer_evidence(cur, *, as_of: Optional[str] = None) -> List[str]:
+    """Flip active entries past ``expires_at`` (default now) to ``expired``."""
+    cutoff = as_of if as_of is not None else "now()"
+    if as_of is not None:
+        cur.execute(
+            "UPDATE research.reviewer_evidence SET status = 'expired' "
+            "WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= %s "
+            "RETURNING reviewer_evidence_id",
+            (cutoff,),
+        )
+    else:
+        cur.execute(
+            "UPDATE research.reviewer_evidence SET status = 'expired' "
+            "WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= now() "
+            "RETURNING reviewer_evidence_id"
+        )
+    return [str(r["reviewer_evidence_id"]) for r in cur.fetchall()]
+
+
+# --------------------------------------------------------------------------- #
+# Evidence coverage + curation queue (job1 tasks 2-3) -- tenant-scoped (RLS)   #
+# --------------------------------------------------------------------------- #
+def _coverage_field(record: Any, name: str) -> Any:
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def upsert_coverage(cur, *, tenant_id: str, record: Any) -> Dict[str, Any]:
+    """Idempotently store/refresh a (tenant, variant) coverage row.
+
+    ``record`` is an ``evidence.coverage.CoverageRecord`` or an equivalent dict. The
+    cursor must come from a tenant-scoped session so RLS applies.
+    """
+    cur.execute(
+        """
+        INSERT INTO clinical.evidence_coverage (
+            tenant_id, variant_key, gene, vcep, disease, variant_class, provider,
+            present_criteria, missing_criteria, blocked, blocking_reason, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+        ON CONFLICT (tenant_id, variant_key) DO UPDATE SET
+            gene = EXCLUDED.gene, vcep = EXCLUDED.vcep, disease = EXCLUDED.disease,
+            variant_class = EXCLUDED.variant_class, provider = EXCLUDED.provider,
+            present_criteria = EXCLUDED.present_criteria,
+            missing_criteria = EXCLUDED.missing_criteria,
+            blocked = EXCLUDED.blocked, blocking_reason = EXCLUDED.blocking_reason,
+            updated_at = now()
+        RETURNING coverage_id, tenant_id, variant_key, gene, vcep, disease,
+                  variant_class, provider, present_criteria, missing_criteria,
+                  blocked, blocking_reason, updated_at
+        """,
+        (
+            tenant_id, _coverage_field(record, "variant_key"),
+            _coverage_field(record, "gene"), _coverage_field(record, "vcep"),
+            _coverage_field(record, "disease"), _coverage_field(record, "variant_class"),
+            _coverage_field(record, "provider"),
+            Jsonb(list(_coverage_field(record, "present_criteria") or [])),
+            Jsonb(list(_coverage_field(record, "missing_categories")
+                       or _coverage_field(record, "missing_criteria") or [])),
+            bool(_coverage_field(record, "blocked")),
+            _coverage_field(record, "blocking_reason"),
+        ),
+    )
+    row = cur.fetchone()
+    return {k: _jsonify(v) for k, v in dict(row).items()}
+
+
+def list_coverage(cur) -> List[Dict[str, Any]]:
+    """All coverage rows visible to the tenant session (RLS-scoped)."""
+    cur.execute(
+        "SELECT coverage_id, tenant_id, variant_key, gene, vcep, disease, "
+        "variant_class, provider, present_criteria, missing_criteria, blocked, "
+        "blocking_reason, updated_at FROM clinical.evidence_coverage "
+        "ORDER BY variant_key"
+    )
+    return [{k: _jsonify(v) for k, v in dict(row).items()} for row in cur.fetchall()]
+
+
+def enqueue_curation_item(cur, *, tenant_id: str, item: Any) -> Optional[Dict[str, Any]]:
+    """Enqueue a curation item; a duplicate OPEN (tenant, variant, kind) is a no-op.
+
+    ``item`` is an ``evidence.curation.CurationItem`` or an equivalent dict. Returns
+    the inserted row, or ``None`` when the open item already existed.
+    """
+    detail = item.detail if hasattr(item, "detail") else item.get("detail")
+    cur.execute(
+        """
+        INSERT INTO clinical.curation_queue (tenant_id, variant_key, kind, severity, detail)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (tenant_id, variant_key, kind) WHERE state = 'open' DO NOTHING
+        RETURNING curation_id, tenant_id, variant_key, kind, severity, detail,
+                  state, created_at, resolved_at
+        """,
+        (
+            tenant_id,
+            item.variant_key if hasattr(item, "variant_key") else item.get("variant_key"),
+            item.kind if hasattr(item, "kind") else item.get("kind"),
+            item.severity if hasattr(item, "severity") else item.get("severity", "warning"),
+            Jsonb(dict(detail or {})),
+        ),
+    )
+    row = cur.fetchone()
+    return {k: _jsonify(v) for k, v in dict(row).items()} if row is not None else None
+
+
+def list_curation_items(cur, *, kind: Optional[str] = None,
+                        state: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Curation queue items visible to the tenant session, newest first."""
+    clauses: List[str] = []
+    params: List[Any] = []
+    if kind is not None:
+        clauses.append("kind = %s")
+        params.append(kind)
+    if state is not None:
+        clauses.append("state = %s")
+        params.append(state)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    cur.execute(
+        "SELECT curation_id, tenant_id, variant_key, kind, severity, detail, state, "
+        f"created_at, resolved_at FROM clinical.curation_queue{where} "
+        "ORDER BY created_at DESC, curation_id",
+        tuple(params),
+    )
+    return [{k: _jsonify(v) for k, v in dict(row).items()} for row in cur.fetchall()]
+
+
+def set_curation_state(cur, curation_id: str, state: str) -> Dict[str, Any]:
+    """Update a curation item's state; stamps ``resolved_at`` on resolution."""
+    cur.execute(
+        "UPDATE clinical.curation_queue SET state = %s, "
+        "resolved_at = CASE WHEN %s IN ('resolved', 'dismissed') THEN now() ELSE resolved_at END "
+        "WHERE curation_id = %s "
+        "RETURNING curation_id, tenant_id, variant_key, kind, severity, detail, "
+        "state, created_at, resolved_at",
+        (state, state, curation_id),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise LookupError(f"curation item {curation_id} not visible to this session")
+    return {k: _jsonify(v) for k, v in dict(row).items()}

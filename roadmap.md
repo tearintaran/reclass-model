@@ -17,13 +17,22 @@ unfinished-todo list and [overview.md](overview.md) is the project orientation.
 
 ## The core reframe
 
-The remaining work is mostly **not** code. The engine, evidence providers,
+For **clinical release**, the remaining binding work is mostly **not** code. The
+engine, evidence providers,
 persistence with row-level security, API (with a pinned OpenAPI contract and
 startup preflight checks), sign-off workflow, audit logging, change-control
-reanalysis triggers, FHIR export, deployment, observability, and CI are already
-scaffolded and tested (781 tests passing). What separates this from a clinical
+reanalysis triggers, FHIR export, deployment, observability, CI, and the full
+scalable-product feature layer (Phase 8) are already scaffolded and tested (877
+tests passing). What separates this from a clinical
 product is **clinical validation, regulatory clearance, data licensing, and
 credentialed human accountability** — none of which are software.
+
+For a **scalable product**, the 2026-06-19 project review's code-actionable
+productization backlog is now **built and tested**: evidence workbench and evidence
+operations, release-gate workflow enforcement, continuous reanalysis operations,
+enterprise deployment/security, and LIS/EHR/API integration surfaces (see Phase 8).
+That backlog no longer appears in [gap.md](gap.md); what remains there is the
+non-code clinical, regulatory, data-licensing, and infrastructure work.
 
 Validation evidence already on record:
 
@@ -59,6 +68,7 @@ validation, and governance are the gating constraints.**
 | 5 | Software as a clinical product (QMS) | 🔧 | Software + Quality | 0 |
 | 6 | Integration & operations | 🔧 | Software + Lab operations | 5 |
 | 7 | Post-market surveillance | ⚠️ | Lab operations + Quality | 4, 6 |
+| 8 | Scalable product feature layer | 🔧 | Product + Software + Lab operations | 0, 2, 5, 6 |
 
 Critical path to first patient use: **0 → 1 → 4** (with 2 and 3 feeding 4).
 Phases 5–6 run in parallel and gate *deployment*, not scientific validity.
@@ -176,7 +186,7 @@ intended clinical use, with versioned, reproducible snapshots.
 A formal study, not the development harness.
 
 - [ ] **Analytical validation** — confirm the engine computes correctly (largely
-  covered by the 781-test suite + synthetic/ClinGen gates). The report is now
+  covered by the 877-test suite + synthetic/ClinGen gates). The report is now
   generated from a single command (`validation/analytical_validation.py` →
   `validation/reports/analytical_validation.md`/`.json`, also via
   `reclass report analytical-validation`); the remaining gate is a credentialed
@@ -209,9 +219,12 @@ Mostly scaffolded; needs formalization.
   - 🔧 Harden existing auth (`ReClass Model/api/auth.py`, `api/oidc.py`),
     authorization (`authz.py`), audit log + retention (`audit.py`,
     `ReClass Model/deploy/migrations/001_audit_log.sql`), tenant RLS, and
-    observability (`observability.py`, `/metrics`). RS256/JWKS validation exists;
-    production identity-provider rollout, key-management policy, and security
-    review remain.
+    observability (`observability.py`, `/metrics`). RS256/JWKS validation, an
+    OIDC-only production auth mode, fail-closed startup preflight, rate/request
+    limits (`api/ratelimit.py`), audit-retention policy and structured security
+    events (`api/audit.py`), and SLO metrics (`api/observability.py`) now exist;
+    production identity-provider rollout, key-management policy, and the security
+    review itself remain.
 - [ ] **Human-factors / usability validation** of the reviewer UI
   (🔧 `ReClass Model/frontend/`, mounted at `/reviewer/`).
 - [ ] **Deployment & resilience**: 🔧 Docker/Compose, migration ledger, backup
@@ -228,9 +241,10 @@ Mostly scaffolded; needs formalization.
 
 - [ ] **LIS / EHR integration** via HL7 / FHIR Genomics, with a defined
   result-transmission and amended-report workflow. A deterministic FHIR Genomics
-  serializer with draft → final → amended state transitions and byte-identical
-  replayable outbound payloads exists in `ReClass Model/reporting/fhir.py`; the
-  live connection to a real LIS/EHR remains.
+  serializer with draft → final → amended state transitions, byte-identical
+  replayable outbound payloads, an LIS/EHR amended-report lifecycle adapter, and
+  clinician-notification tracking now exists in `ReClass Model/reporting/fhir.py`;
+  the live connection to a real LIS/EHR remains.
 - [ ] **Operational SOPs** for reanalysis runs, alert triage, sign-off, and
   patient-safe summary release (start from
   [ReClass Model/docs/operations_sop.md](ReClass%20Model/docs/operations_sop.md)).
@@ -256,6 +270,53 @@ amend workflow operational and documented.
 
 **Exit criteria:** continuous surveillance and reclassification-notification loop
 in routine operation.
+
+---
+
+## Phase 8 — Scalable Product Feature Layer 🔧
+
+This phase turns the working proof of concept into a supportable product surface.
+It does not replace the clinical/regulatory gates above; it makes them enforceable
+and usable at scale. The **software for all five areas is now built and tested**
+(2026-06-19, part of the 877-test suite). What remains in each is the non-code
+hardening — real evidence population, credentialed sign-off, data licensing, and
+production identity/deployment rollout — which lives in Phases 1–7 and [gap.md](gap.md).
+
+- [x] **Evidence workbench and evidence operations**: structured curation/import
+  for PVS1/LoF, PS3/BS3 functional assays, PM3 phasing, PP1/BS4 segregation, PP4
+  phenotype/HPO matching, PS4 cohort/case-control evidence, and BA1/BS1 benign
+  frequency review; coverage dashboards by gene, VCEP, disease, provider, tenant,
+  and variant class. Built in `ReClass Model/evidence/workbench.py`,
+  `coverage.py`, `curation.py`, and `ingest/{batch,vcf,csv}_import.py`.
+- [x] **Release-gate workflow hardening**: structured sign-off packets carrying
+  scope, config hash, source snapshots, validation report id, conflict disposition,
+  reviewer credential, effective date, and re-review date; block release when
+  policy gates are incomplete. Built in `ReClass Model/validation/signoff.py`,
+  `release_gate.py`, and `release_packet.py` (five-state machine).
+- [x] **Continuous reanalysis product layer**: queue/run dashboards, alert
+  ownership/SLA/state, failed/skipped reason-code reporting, same-tier audit
+  review, amended-report tracking, and outbound notification jobs. Built in
+  `ReClass Model/monitoring/`, `ops/`, `storage/alerts.py`, and `reporting/fhir.py`.
+- [x] **Enterprise deployment and security**: fail-closed production preflight,
+  OIDC-only production auth mode, rate/request limits, tenant administration,
+  audit-retention policy, restore-test reporting, and SLO dashboards. Built in
+  `ReClass Model/api/settings.py`, `ratelimit.py`, `audit.py`, `observability.py`,
+  and `routers/admin.py`.
+- [x] **Integration and customer-facing surfaces**: LIS/EHR adapters around the
+  existing FHIR Genomics serializer, VCF/CSV/batch import, OpenAPI-generated
+  clients, webhooks, validation packets, and tenant onboarding readiness checks.
+  Built in `ReClass Model/reporting/fhir.py`, `api/webhooks.py`,
+  `api/generated_client.py`, and `ops/onboarding.py`.
+
+**Software exit criteria — met:** a tenant can be onboarded, evidence can be curated
+and reviewed, release gates are enforced in software, reanalysis operations are
+observable, and validated outputs can move through the customer's lab or research
+workflow.
+
+**Remaining (non-software) exit criteria:** the surfaces above must be populated
+with validated upstream evidence, signed off by credentialed reviewers, licensed for
+clinical use, and connected to a real identity provider and a live LIS/EHR before
+they carry patient-facing output.
 
 ---
 

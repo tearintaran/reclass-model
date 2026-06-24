@@ -69,7 +69,7 @@ select = ["E", "F", "W"]
 # skipped so this check stays scoped to Job 3 packages.
 [tool.mypy]
 python_version = "3.11"
-files = ["engine", "api", "storage"]
+files = ["engine", "api", "storage", "worklist"]
 ignore_missing_imports = true
 follow_imports = "skip"
 warn_unused_ignores = false

@@ -15,6 +15,21 @@ NON_CURATED_PATHOGENIC_SOURCES = {
     "conservation",
 }
 
+CONFLICT_DISPOSITIONS = (
+    "no_conflict",
+    "resolved",
+    "exception_signed",
+    "accepted_with_rationale",
+    "unresolved",
+    "rejected",
+)
+RELEASE_CLEARING_DISPOSITIONS = {
+    "no_conflict",
+    "resolved",
+    "exception_signed",
+    "accepted_with_rationale",
+}
+
 
 def _as_dict(value: Any) -> dict[str, Any]:
     if value is None:
@@ -115,6 +130,27 @@ def _has_signature(exception: dict[str, Any]) -> bool:
         or exception.get("signed_off_by")
         or sign_off.get("signed_off_by")
     )
+
+
+def normalize_disposition(disposition: Any) -> str:
+    """Normalize a conflict-policy disposition into the release-gate vocabulary."""
+    value = str(disposition or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "none": "no_conflict",
+        "pass": "no_conflict",
+        "cleared": "resolved",
+        "clear": "resolved",
+        "signed_exception": "exception_signed",
+        "signed_variant_exception": "exception_signed",
+        "accepted": "accepted_with_rationale",
+    }
+    return aliases.get(value, value)
+
+
+def disposition_blocks_release(disposition: Any) -> bool:
+    """True when a conflict-policy disposition is absent or release-blocking."""
+    normalized = normalize_disposition(disposition)
+    return normalized not in RELEASE_CLEARING_DISPOSITIONS
 
 
 def _signed_variant_exception(

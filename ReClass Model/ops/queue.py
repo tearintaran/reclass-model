@@ -152,6 +152,30 @@ def build_run_manifest(
     }
 
 
+def queue_status(rows: List[Union[QueueItem, Dict[str, Any]]]) -> Dict[str, Any]:
+    """Summarize queue rows for an operator dashboard."""
+    counts: Dict[str, int] = {}
+    reason_codes: Dict[str, int] = {}
+    oldest_pending = None
+    for row in rows:
+        data = row.to_dict() if isinstance(row, QueueItem) else dict(row)
+        state = str(data.get("state") or "pending")
+        counts[state] = counts.get(state, 0) + 1
+        code = data.get("last_reason_code") or data.get("reason_code")
+        if code:
+            reason_codes[str(code)] = reason_codes.get(str(code), 0) + 1
+        enqueued_at = data.get("enqueued_at")
+        if state == "pending" and enqueued_at is not None:
+            if oldest_pending is None or str(enqueued_at) < str(oldest_pending):
+                oldest_pending = enqueued_at
+    return {
+        "total": len(rows),
+        "by_state": counts,
+        "reason_codes": reason_codes,
+        "oldest_pending": oldest_pending,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # DB-backed queue (clinical.reanalysis_queue); requires a tenant-scoped cursor  #
 # --------------------------------------------------------------------------- #

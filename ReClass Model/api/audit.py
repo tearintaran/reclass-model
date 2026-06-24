@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Protocol
 
 
@@ -40,6 +40,26 @@ class AuditEntry:
         }
 
 
+@dataclass(frozen=True)
+class SecurityEvent:
+    """Structured security event carried through the operational audit log."""
+
+    event_type: str
+    outcome: str
+    actor_id: str = "system"
+    resource_type: str = "security"
+    resource_id: str = "platform"
+    detail: Dict[str, Any] = field(default_factory=dict)
+
+    def audit_action(self) -> str:
+        return f"security.{self.event_type}"
+
+    def to_detail(self) -> Dict[str, Any]:
+        detail = dict(self.detail)
+        detail["outcome"] = self.outcome
+        return detail
+
+
 class AuditLog(Protocol):
     def append(
         self,
@@ -59,6 +79,8 @@ class AuditLog(Protocol):
         action: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]: ...
+
+    def prune_before(self, *, tenant_id: str, before: datetime) -> int: ...
 
 
 class InMemoryAuditLog:
@@ -104,6 +126,15 @@ class InMemoryAuditLog:
             rows = [e for e in rows if e.action == action]
         rows = rows[-limit:]
         return [e.to_dict() for e in reversed(rows)]
+
+    def prune_before(self, *, tenant_id: str, before: datetime) -> int:
+        before = before if before.tzinfo else before.replace(tzinfo=timezone.utc)
+        before_count = len(self._entries)
+        self._entries = [
+            entry for entry in self._entries
+            if entry.tenant_id != tenant_id or entry.created_at >= before
+        ]
+        return before_count - len(self._entries)
 
 
 class DbAuditLog:
@@ -198,3 +229,58 @@ class DbAuditLog:
             d["tenant_id"] = str(d["tenant_id"])
             out.append(d)
         return out
+
+    def prune_before(self, *, tenant_id: str, before: datetime) -> int:
+        from storage.db import tenant_session
+
+        with self._conn() as conn:
+            with tenant_session(conn, tenant_id, role=self._role) as cur:
+                cur.execute(
+                    "DELETE FROM clinical.audit_log "
+                    "WHERE tenant_id = %s AND created_at < %s",
+                    (tenant_id, before),
+                )
+                return int(cur.rowcount or 0)
+
+
+def append_security_event(
+    audit: AuditLog,
+    *,
+    tenant_id: str,
+    event_type: str,
+    outcome: str,
+    actor_id: str = "system",
+    resource_type: str = "security",
+    resource_id: str = "platform",
+    detail: Optional[Dict[str, Any]] = None,
+) -> AuditEntry:
+    """Append a structured ``security.*`` audit entry."""
+    event = SecurityEvent(
+        event_type=event_type,
+        outcome=outcome,
+        actor_id=actor_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        detail=dict(detail or {}),
+    )
+    return audit.append(
+        tenant_id=tenant_id,
+        actor_id=event.actor_id,
+        action=event.audit_action(),
+        resource_type=event.resource_type,
+        resource_id=event.resource_id,
+        detail=event.to_detail(),
+    )
+
+
+def apply_retention_policy(
+    audit: AuditLog,
+    *,
+    tenant_id: str,
+    retention_days: int,
+    now: datetime | None = None,
+) -> int:
+    """Prune entries older than the configured retention age."""
+    clock = now or _now()
+    cutoff = clock - timedelta(days=max(0, int(retention_days)))
+    return audit.prune_before(tenant_id=tenant_id, before=cutoff)

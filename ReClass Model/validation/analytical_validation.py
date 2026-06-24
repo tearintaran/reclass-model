@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -252,6 +253,28 @@ def analyze_benchmark(fixture):
     }
 
 
+def validation_report_id(payload):
+    """Stable id for the validation metrics artifact, independent of generation time."""
+    stable = {
+        "engine_version": payload.get("engine_version"),
+        "config_hash": payload.get("config_hash"),
+        "benchmarks": [
+            {
+                "benchmark": bench.get("benchmark"),
+                "case_count": bench.get("case_count"),
+                "gate_pass": bench.get("gate_pass"),
+                "metrics": bench.get("metrics"),
+                "fixture_source_versions": bench.get("fixture_source_versions"),
+            }
+            for bench in payload.get("benchmarks", [])
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(stable, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    return f"analytical-validation-{digest[:16]}"
+
+
 def command_manifest(benchmarks, invocation=None):
     harness_commands = []
     for name in benchmarks:
@@ -285,7 +308,7 @@ def build_report(benchmarks=None, *, fixtures_dir=None, invocation=None):
     fixture_payloads = [load_fixture(name, fixtures_dir=fixtures_dir) for name in names]
     benchmark_reports = [analyze_benchmark(fixture) for fixture in fixture_payloads]
     fp = C.config_fingerprint()
-    return {
+    report = {
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "engine_version": C.ENGINE_VERSION,
         "config_hash": fp.get("config_hash"),
@@ -300,6 +323,8 @@ def build_report(benchmarks=None, *, fixtures_dir=None, invocation=None):
         "benchmarks": benchmark_reports,
         "known_limitations_and_excluded_scopes": list(KNOWN_LIMITATIONS),
     }
+    report["validation_report_id"] = validation_report_id(report)
+    return report
 
 
 def _pct(value):
@@ -477,6 +502,7 @@ def render_markdown(report):
     w("|---|---|")
     w(f"| Engine version | `{report['engine_version']}` |")
     w(f"| Config hash | `{report['config_hash']}` |")
+    w(f"| Validation report id | `{report['validation_report_id']}` |")
     w(f"| Clinical-release signed off | {_fmt_bool(report['clinical_release_signed_off'])} |")
     w("")
 

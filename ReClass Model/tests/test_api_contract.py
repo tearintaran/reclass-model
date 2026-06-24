@@ -352,10 +352,19 @@ class TestCookbookExamples(unittest.TestCase):
         results = run_cookbook_examples(client, {"X-Tenant-Id": tenant_id})
         self.assertEqual(
             set(results),
-            {"evidence_resolution", "classify", "sign_off", "report", "reanalysis", "alert"},
+            {
+                "evidence_resolution",
+                "classify",
+                "sign_off",
+                "report",
+                "reanalysis",
+                "alert",
+                "webhook",
+            },
         )
         self.assertEqual(results["report"]["fhir"]["resourceType"], "Bundle")
         self.assertEqual(results["alert"]["state"], "acknowledged")
+        self.assertEqual(results["webhook"]["deliveries"][0]["state"], "pending")
 
 
 if __name__ == "__main__":

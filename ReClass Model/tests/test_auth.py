@@ -154,6 +154,7 @@ class TestPreflight(unittest.TestCase):
                 }, fh)
             settings = Settings(
                 environment="production",
+                auth_mode="oidc",
                 db_role="reclass_app",
                 oidc_issuer="https://idp.example/",
                 oidc_jwks={"keys": [{"kty": "RSA", "kid": "test"}]},

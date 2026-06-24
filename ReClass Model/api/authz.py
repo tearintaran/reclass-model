@@ -16,10 +16,20 @@ PERMISSIONS: dict[str, FrozenSet[str]] = {
     "classification:read": frozenset({"viewer", "reviewer", "operator", "admin"}),
     "classification:write": frozenset({"reviewer", "operator", "admin"}),
     "classification:sign_off": frozenset({"reviewer", "admin"}),
+    # Worklist cases (product layer). PHI access is gated separately from the
+    # de-identified queue: a plain viewer can work the queue but not see PHI.
+    "case:read": frozenset({"viewer", "reviewer", "operator", "admin"}),
+    "case:read_phi": frozenset({"reviewer", "operator", "admin"}),
+    "case:write": frozenset({"reviewer", "operator", "admin"}),
+    "case:transition": frozenset({"reviewer", "operator", "admin"}),
     "alert:read": frozenset({"viewer", "reviewer", "operator", "admin"}),
     "alert:write": frozenset({"reviewer", "operator", "admin"}),
     "reanalysis:run": frozenset({"operator", "admin"}),
     "audit:read": frozenset({"reviewer", "operator", "admin"}),
+    "audit:write": frozenset({"operator", "admin"}),
+    "tenant:admin": frozenset({"admin"}),
+    "webhook:admin": frozenset({"operator", "admin"}),
+    "webhook:emit": frozenset({"operator", "admin"}),
     "validation:run": frozenset({"admin"}),
 }
 

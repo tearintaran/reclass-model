@@ -3,10 +3,17 @@
 This document describes how to deploy the ReClass API, reviewer frontend, and
 PostgreSQL backend.
 
+Status as of 2026-06-19: this is a concrete local/staging deployment scaffold with
+fail-closed production preflight, OIDC-only production auth mode, rate/request
+limits, tenant administration, audit-retention hooks, webhook delivery, SLO metric
+surfaces, and a Docker/PostgreSQL test profile. It is still not a clinical
+production deployment without the validation, QMS, hosting, security-review, and
+operational controls described in `../../roadmap.md`.
+
 ## Prerequisites
 
 - PostgreSQL 16
-- Python 3.12+ (or use the provided Docker image)
+- Python 3.11+ (or use the provided Docker image)
 - Provider caches (REVEL, gnomAD) and optional ClinGen fixture for evidence resolution
 
 ## Quick start (Docker Compose)
@@ -17,12 +24,19 @@ From `ReClass Model/`:
 docker compose -f deploy/docker-compose.yml up --build
 ```
 
-This starts PostgreSQL, applies `db/schema.sql` and the audit migration, and
+This starts PostgreSQL, applies `db/schema.sql` and ordered migrations, and
 serves the API at `http://localhost:8000`.
 
 - Health: `GET /health`
+- Preflight/readiness: `GET /health/preflight`
 - Metrics: `GET /metrics` (Prometheus text format)
 - Reviewer UI: `http://localhost:8000/reviewer/`
+
+Run the full test suite against the Compose PostgreSQL service:
+
+```bash
+docker compose -f deploy/docker-compose.yml --profile test run --rm test
+```
 
 ## Manual deployment
 
@@ -54,13 +68,21 @@ Create a tenant and application role per your lab policy. Use
 |---|---|---|
 | `RECLASS_API_ENV` | yes | `production` |
 | `RECLASS_DB` | yes | PostgreSQL database name |
-| `RECLASS_DB_ROLE` | recommended | Non-superuser role for RLS |
-| `RECLASS_OIDC_ISSUER` | recommended | Expected identity-provider issuer for RS256/JWKS validation |
+| `RECLASS_DB_ROLE` | yes | Non-superuser role for RLS |
+| `RECLASS_AUTH_MODE` | yes | `oidc` in production; disables HS256/API-key fallback |
+| `RECLASS_OIDC_ISSUER` | yes | Expected identity-provider issuer for RS256/JWKS validation |
 | `RECLASS_OIDC_AUDIENCE` | recommended | Expected API audience when issued by the IdP |
-| `RECLASS_OIDC_JWKS_URL` or `RECLASS_OIDC_JWKS` | recommended | JWKS endpoint or pinned JWKS JSON |
-| `RECLASS_JWT_SECRET` | optional | HS256 fallback/local tooling secret; prefer OIDC/JWKS in production |
-| `RECLASS_API_KEYS` | optional | Static service-account keys for controlled automation |
+| `RECLASS_OIDC_JWKS_URL` or `RECLASS_OIDC_JWKS` | yes | JWKS endpoint or pinned JWKS JSON |
+| `RECLASS_JWT_SECRET` | no | HS256 local/dev secret; ignored when `RECLASS_AUTH_MODE=oidc` |
+| `RECLASS_API_KEYS` | no | Static local/dev/service keys; ignored when `RECLASS_AUTH_MODE=oidc` |
 | `RECLASS_AUDIT_BACKEND` | yes | Set to `db` |
+| `RECLASS_AUDIT_RETENTION_DAYS` | recommended | Age threshold for explicit audit pruning |
+| `RECLASS_RATE_LIMIT_PER_MINUTE` | recommended | Per-client/path API guard |
+| `RECLASS_REQUEST_SIZE_LIMIT_BYTES` | recommended | Request body cap from `Content-Length` |
+| `RECLASS_REFERENCE_METADATA` | yes | Reference FASTA metadata sidecar |
+| `RECLASS_PROVIDER_CACHE_MANIFEST` | yes | Provider-cache manifest file or directory |
+| `RECLASS_PREFLIGHT_ON_STARTUP` | default yes in prod | Run strict preflight at startup |
+| `RECLASS_PREFLIGHT_CHECK_DATABASE` | default yes in prod | Check DB role, RLS, and migration ledger |
 | `RECLASS_CLINGEN_FIXTURE` | optional | Path to ClinGen fixture |
 
 See [auth.md](auth.md) for authentication configuration.
@@ -75,8 +97,9 @@ before any shared deployment.
 python -m uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
 
-For production, run behind a reverse proxy (TLS termination, rate limiting) and
-use a process manager (systemd, Kubernetes, etc.).
+For production, run behind a reverse proxy (TLS termination and network policy)
+and use a process manager (systemd, Kubernetes, etc.). Keep the in-app rate and
+request-size limits enabled even when a proxy also enforces them.
 
 ### 5. Serve the reviewer frontend
 
@@ -174,13 +197,35 @@ Do not edit the ledger to bypass this. Recovery path:
 5. Re-run `python db/apply.py reclass_prod` and archive the incident notes under
    the deployment/change-control record.
 
+Production startup preflight verifies that the latest local migration is present
+in `public.reclass_schema_migrations` when `RECLASS_PREFLIGHT_CHECK_DATABASE` is
+enabled. A missing or checksum-mismatched migration blocks startup.
+
 ## Observability
 
 - **Structured logs**: JSON request lines on stdout (`reclass.api` logger)
-- **Health endpoint**: `/health` returns status and request count
-- **Metrics endpoint**: `/metrics` exposes request/error counters and average latency
+- **Health endpoint**: `/health` returns request count and readiness check names
+- **Readiness endpoint**: `/health/preflight` reports reference metadata,
+  provider-cache manifests, OIDC/JWKS, audit backend, DB role/RLS, migration
+  ledger, and restore-test metadata
+- **Metrics endpoint**: `/metrics` exposes request/error counters, average
+  latency, failed evidence-resolution counter, security-event counter, provider
+  cache age, reanalysis lag, alert backlog, and restore-test age
 
 Integrate with your log aggregator and Prometheus/Grafana stack.
+
+## Tenant Admin, Onboarding, and Webhooks
+
+Tenant administration lives under `/admin/tenants` and requires the `admin` role.
+Use `/admin/tenants/{tenant_id}/readiness` before go-live to check source-cache
+setup, reference-cache metadata, OIDC setup, a sample classification smoke test,
+and the platform preflight report.
+
+Webhook endpoints live under `/webhooks/endpoints` and support signed outbound
+events for `tier_crossing`, `source_snapshot_update`, `config_change`, and
+`reanalysis_completed`. Delivery jobs are HMAC-SHA256 signed with
+`X-ReClass-Signature` and retried with exponential backoff by the worker using
+`api.webhooks.deliver_due`.
 
 ## Container image
 
@@ -198,7 +243,7 @@ default. Override via environment at runtime.
 1. Run the full unit test suite
 2. Create a pre-upgrade backup
 3. Apply schema and ordered migrations with `python db/apply.py reclass_prod`
-4. Verify the migration ledger checksums
+4. Verify the migration ledger checksums and `/health/preflight`
 5. Deploy API with rolling restart
-6. Verify `/health` and a smoke-test classification workflow
+6. Verify `/health`, `/metrics`, and a smoke-test classification workflow
 7. Review [release_review.md](release_review.md) reports if engine version changed

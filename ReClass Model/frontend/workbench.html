@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReClass Evidence Workbench</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="workbench.css">
+</head>
+<body>
+  <header>
+    <h1>ReClass Evidence Workbench</h1>
+    <p class="subtitle">Enter evidence → track coverage → triage curation → import variants</p>
+  </header>
+
+  <section id="session-panel" class="panel">
+    <h2>Session</h2>
+    <div class="grid">
+      <label>API base URL
+        <input id="api-base" type="text" value="" placeholder="http://127.0.0.1:8000">
+      </label>
+      <label>Tenant ID (UUID)
+        <input id="tenant-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+      </label>
+      <label>Bearer token
+        <input id="bearer-token" type="password" placeholder="JWT or API key" autocomplete="off">
+      </label>
+    </div>
+    <button id="save-session">Save session</button>
+    <span id="session-status" class="status"></span>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="evidence">Reviewer evidence</button>
+    <button class="tab" data-tab="coverage">Coverage</button>
+    <button class="tab" data-tab="curation">Curation</button>
+    <button class="tab" data-tab="import">Import</button>
+  </nav>
+
+  <!-- Reviewer-entered evidence ------------------------------------------- -->
+  <main id="tab-evidence" class="tab-panel active">
+    <section class="panel">
+      <h2>Enter structured evidence</h2>
+      <p class="hint">Persists a reviewer/pipeline-supplied criterion with provenance
+        (source version, checksum, access date, reviewer, re-review date). Stored
+        de-identified — keyed only on the public variant key.</p>
+      <div class="grid variant-grid">
+        <label>Chrom <input id="ev-chrom" value="1"></label>
+        <label>Pos <input id="ev-pos" type="number" value="100"></label>
+        <label>Ref <input id="ev-ref" value="A"></label>
+        <label>Alt <input id="ev-alt" value="G"></label>
+        <label>Build <input id="ev-build" value="GRCh38"></label>
+      </div>
+      <div class="grid">
+        <label>ACMG criterion
+          <select id="ev-criterion"></select>
+        </label>
+        <label>Direction
+          <select id="ev-direction">
+            <option value="pathogenic">pathogenic</option>
+            <option value="benign">benign</option>
+            <option value="neutral">neutral</option>
+          </select>
+        </label>
+        <label>Strength
+          <select id="ev-strength">
+            <option value="">(none)</option>
+            <option value="stand_alone">stand_alone</option>
+            <option value="very_strong">very_strong</option>
+            <option value="strong">strong</option>
+            <option value="moderate">moderate</option>
+            <option value="supporting">supporting</option>
+          </select>
+        </label>
+        <label>Source <input id="ev-source" value="reviewer"></label>
+        <label>Source version <input id="ev-source-version" placeholder="lab-v1 / PMID:..."></label>
+        <label>Access date <input id="ev-access-date" type="date"></label>
+        <label>Reviewer <input id="ev-reviewer" placeholder="Dr. Reviewer, PhD"></label>
+        <label>Re-review by <input id="ev-expires" type="date"></label>
+      </div>
+      <label class="full">Notes <input id="ev-notes" placeholder="optional"></label>
+      <div class="actions">
+        <button id="btn-submit-evidence">Submit evidence</button>
+        <button id="btn-list-evidence">List for this variant</button>
+      </div>
+      <p id="evidence-status" class="status"></p>
+      <div id="evidence-region" class="region"></div>
+    </section>
+  </main>
+
+  <!-- Coverage ------------------------------------------------------------ -->
+  <main id="tab-coverage" class="tab-panel">
+    <section class="panel">
+      <h2>Record coverage observation</h2>
+      <p class="hint">The blocked / missing-category status is derived from the present
+        criteria and the variant class.</p>
+      <div class="grid">
+        <label>Variant key <input id="cov-key" value="GRCh38-1-100-A-G"></label>
+        <label>Gene <input id="cov-gene" placeholder="BRCA1"></label>
+        <label>VCEP <input id="cov-vcep"></label>
+        <label>Disease <input id="cov-disease"></label>
+        <label>Variant class <input id="cov-class" placeholder="lof / missense / splice"></label>
+        <label>Provider <input id="cov-provider"></label>
+        <label>Present criteria (comma-sep) <input id="cov-present" placeholder="PVS1,PS3"></label>
+      </div>
+      <div class="actions">
+        <button id="btn-record-coverage">Record coverage</button>
+        <button id="btn-coverage-summary">Coverage summary</button>
+        <label class="inline">by
+          <select id="cov-by">
+            <option value="">(overall)</option>
+            <option value="gene">gene</option>
+            <option value="vcep">vcep</option>
+            <option value="disease">disease</option>
+            <option value="variant_class">variant_class</option>
+            <option value="provider">provider</option>
+          </select>
+        </label>
+      </div>
+      <p id="coverage-status" class="status"></p>
+      <div id="coverage-region" class="region"></div>
+    </section>
+  </main>
+
+  <!-- Curation ------------------------------------------------------------ -->
+  <main id="tab-curation" class="tab-panel">
+    <section class="panel">
+      <h2>Scan for curation gaps</h2>
+      <p class="hint">Resolves a variant and surfaces unmatched/ambiguous identity,
+        missing transcript context, missing cohort denominators, and pathogenic/benign
+        conflicts. Resolution policy is handled downstream.</p>
+      <div class="grid variant-grid">
+        <label>Chrom <input id="cur-chrom" value="9"></label>
+        <label>Pos <input id="cur-pos" type="number" value="999"></label>
+        <label>Ref <input id="cur-ref" value="A"></label>
+        <label>Alt <input id="cur-alt" value="T"></label>
+        <label class="inline">Enqueue <input id="cur-enqueue" type="checkbox" checked></label>
+      </div>
+      <div class="actions">
+        <button id="btn-scan-curation">Scan</button>
+        <button id="btn-list-curation">List queue</button>
+      </div>
+      <p id="curation-status" class="status"></p>
+      <div id="curation-region" class="region"></div>
+    </section>
+  </main>
+
+  <!-- Import -------------------------------------------------------------- -->
+  <main id="tab-import" class="tab-panel">
+    <section class="panel">
+      <h2>VCF / CSV variant import (dry-run)</h2>
+      <p class="hint">Normalizes identities, detects duplicates, and previews
+        evidence resolution. Nothing is persisted.</p>
+      <div class="actions">
+        <label class="inline">Format
+          <select id="imp-format">
+            <option value="vcf">vcf</option>
+            <option value="csv">csv</option>
+          </select>
+        </label>
+        <label class="inline">Resolve preview <input id="imp-resolve" type="checkbox"></label>
+        <button id="btn-import-preview">Preview</button>
+      </div>
+      <textarea id="imp-content" rows="8" placeholder="Paste VCF or CSV here"></textarea>
+      <p id="import-status" class="status"></p>
+      <div id="import-region" class="region"></div>
+    </section>
+  </main>
+
+  <script src="workbench.js"></script>
+</body>
+</html>

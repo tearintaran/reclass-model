@@ -34,7 +34,7 @@ runnable core was implemented directly:
 - `storage/` - tenant-aware repositories, evidence-bundle persistence, cohort
   counts, alerts, and reconstruction verifier.
 - `docs/data_governance.md` - source/version/license register and cache policy.
-- `tests/` - 781 tests in the current environment.
+- `tests/` - 877 tests in the current environment.
 
 ## What you coordinate
 

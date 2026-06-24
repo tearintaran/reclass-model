@@ -1,0 +1,42 @@
+/* Evidence Workbench — page-specific styling layered on top of styles.css.
+   Only adds rules the shared stylesheet does not already provide (it is reused as-is
+   for the panel / grid / region / status / tab classes). */
+
+label.full {
+  display: block;
+  grid-column: 1 / -1;
+}
+
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: 1rem;
+}
+
+textarea#imp-content {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+  margin-top: 0.5rem;
+}
+
+.card {
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.card strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.card button {
+  margin-right: 0.4rem;
+}
+
+.status.ok { color: #1a7f37; }
+.status.error { color: #cf222e; }

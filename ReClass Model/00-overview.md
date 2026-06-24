@@ -2,7 +2,7 @@
 
 > Module: overview
 > Historical owner: `orchestrator-agent`
-> Current status: documentation aligned to the local snapshot
+> Current status: documentation aligned to the 2026-06-19 local review
 
 This document is the compact technical overview for contributors. The
 practitioner/researcher overview lives at `../overview.md`; unfinished todos live
@@ -26,24 +26,36 @@ Orient contributors to the current local project:
   per-case serious-discordance drill-downs, diagnostic plots, real fixtures, ingest
   scripts, database schema, storage adapters, governance docs, and PostgreSQL/RLS
   tests.
-- What was most recently completed: upstream-evidence adapters (de novo, phasing,
-  segregation, phenotype, functional, disease-mechanism, case-control); byte-stable
-  cache manifests; the full identity-route set (Variation ID, Allele ID, canonical
-  key, SPDI, MANE/HGVS transcript, genomic HGVS) with ambiguity accounting; MANE
-  transcript identity and PS4 denominator/cohort counts in the evidence model;
-  development/validation/holdout fixture splits with an anti-leakage guardrail;
-  reviewer review packets; serious-discordance adjudication; configurable
-  conflict-policy checks; scoped validation gates; locked regression baselines; a
-  pinned/drift-checked OpenAPI contract with runnable cookbook examples; FHIR
-  amended-report state transitions with replayable payloads; change-control
-  reanalysis triggers with an auditable run manifest; startup preflight checks; and
-  an expanded GitHub Actions CI pipeline.
+- What was most recently completed: the 2026-06-19 **scalable-product feature
+  layer** — an evidence workbench (`evidence/workbench.py`, `coverage.py`,
+  `curation.py`) with batch/VCF/CSV import (`ingest/{batch,vcf,csv}_import.py`); an
+  enforced release-gate sign-off state machine and exportable validation packets
+  (`validation/signoff.py`, `release_gate.py`, `release_packet.py`); continuous
+  reanalysis operations, alert triage, and amended-report/notification tracking
+  (`monitoring/`, `ops/`, `storage/alerts.py`, `reporting/fhir.py`); and an
+  enterprise platform/security layer (fail-closed preflight and OIDC-only auth in
+  `api/settings.py`, rate/request limits in `api/ratelimit.py`, audit retention and
+  security events in `api/audit.py`, SLO metrics in `api/observability.py`, the
+  webhook delivery subsystem in `api/webhooks.py`, and tenant administration/
+  onboarding in `api/routers/admin.py`/`ops/onboarding.py`). This built on the prior
+  upstream-evidence adapters, byte-stable cache manifests, full identity-route set
+  with ambiguity accounting, MANE/PS4 evidence-model fields, fixture splits with an
+  anti-leakage guardrail, reviewer review packets, conflict-policy checks, scoped
+  validation gates, locked regression baselines, the pinned/drift-checked OpenAPI
+  contract, FHIR amended-report transitions, change-control reanalysis triggers,
+  startup preflight checks, and the expanded GitHub Actions CI pipeline.
 - What "validated" means here: validation gates report concordance and serious
   pathogenic/benign discordance for a named fixture and engine version.
+- Latest local verification: 877 tests passed; 31 PostgreSQL-backed storage/RLS
+  tests skipped locally without PostgreSQL; `ruff`, scoped `mypy`, the frontend
+  browser harness, and the GRCh38 reference-cache status check passed.
 - What remains: credentialed clinical sign-off and a formal clinical
   validation study, data licensing for clinical use, production identity-provider
   rollout plus deployment hardening, live LIS/EHR integration, and real-world
-  evidence population/calibration for the structured providers.
+  evidence population/calibration for the structured providers and the evidence
+  workbench. The scalable-product feature layer is now **built** in software; the
+  remaining work in those areas is clinical, data, and infrastructure hardening, not
+  missing code (see `../gap.md`).
 
 ## Current data path
 
@@ -128,3 +140,10 @@ Expected current interpretation:
   local restore rehearsal into production disaster-recovery policy.
 - Connect the deterministic FHIR Genomics serializer to live LIS/EHR workflows
   only after local integration validation.
+- Populate and operationalize the now-built scalable-product feature layer
+  (evidence workbench and coverage dashboards, enforced sign-off packets,
+  operational reanalysis dashboards and notifications, fail-closed production
+  deployment checks, and customer-facing import/API/integration surfaces) with
+  validated upstream evidence, credentialed sign-off, data licensing, and a
+  production identity-provider/deployment rollout. The software exists and is tested;
+  the remaining work is non-code (see `../gap.md`).

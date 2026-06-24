@@ -6,13 +6,14 @@ import os
 import sys
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from api.app import create_app  # noqa: E402
-from api.audit import InMemoryAuditLog  # noqa: E402
+from api.audit import InMemoryAuditLog, append_security_event, apply_retention_policy  # noqa: E402
 from api.evidence_resolver import EvidenceResolver  # noqa: E402
 from api.settings import Settings  # noqa: E402
 from api.store import InMemoryClinicalStore  # noqa: E402
@@ -101,6 +102,36 @@ class TestAuditLog(unittest.TestCase):
         ids = {e["resource_id"] for e in listed}
         self.assertNotIn("0", ids)
         self.assertIn("4", ids)
+
+    def test_security_event_endpoint_and_retention_policy(self):
+        created = self.client.post(
+            "/audit/security-events",
+            json={
+                "event_type": "secret_rotation",
+                "outcome": "completed",
+                "resource_id": "oidc-jwks",
+                "detail": {"runbook": "docs/auth.md"},
+            },
+            headers=self.h(),
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["action"], "security.secret_rotation")
+
+        retention = self.client.get("/audit/retention", headers=self.h())
+        self.assertEqual(retention.status_code, 200)
+        self.assertIn("retention_days", retention.json())
+
+    def test_apply_retention_policy_prunes_old_security_events(self):
+        log = InMemoryAuditLog(max_entries=10)
+        append_security_event(
+            log,
+            tenant_id=self.tenant,
+            event_type="auth_failure",
+            outcome="blocked",
+        )
+        log._entries[0].created_at = datetime.now(timezone.utc) - timedelta(days=400)
+        pruned = apply_retention_policy(log, tenant_id=self.tenant, retention_days=365)
+        self.assertEqual(pruned, 1)
 
 
 if __name__ == "__main__":

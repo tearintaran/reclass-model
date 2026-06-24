@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -60,19 +61,34 @@ class Settings:
     oidc_jwks: Dict[str, Any] = field(default_factory=dict)
     #: Static API keys: ``{token: {tenant_id, roles, user_id?}}``.
     api_keys: Dict[str, dict] = field(default_factory=dict)
+    #: ``auto`` accepts OIDC, HS256, and static API-key bearer tokens. ``oidc``
+    #: is the production fail-closed mode: only RS256/JWKS OIDC bearer tokens
+    #: are accepted and HS256/API-key fallback is disabled.
+    auth_mode: str = "auto"
     #: Audit backend name (``memory`` for dev/tests, ``db`` for production).
     audit_backend: str = "memory"
+    #: Operational audit retention policy. Memory pruning is entry-count based;
+    #: database pruning uses this age threshold when explicitly applied.
+    audit_retention_days: int = 365
     #: Roles granted to legacy header-only development sessions.
     legacy_default_roles: Tuple[str, ...] = ("reviewer",)
     #: Max in-memory audit entries before pruning oldest.
     audit_max_entries: int = 10_000
+    #: Per-client request limit over a rolling minute. ``0`` disables it.
+    rate_limit_per_minute: int = 0
+    #: Maximum request body size in bytes based on Content-Length. ``0`` disables it.
+    request_size_limit_bytes: int = 0
     #: Opt-in strict preflight gate at app startup.
     preflight_on_startup: bool = False
+    #: Include database/RLS/migration-ledger checks in strict preflight.
+    preflight_check_database: bool = False
     #: Reference FASTA metadata sidecar written by ``engine.reference_cache``.
     reference_metadata_path: str = "data/reference/GRCh38.fa.meta.json"
     #: Provider-cache manifest path, or a provider-cache directory containing
     #: manifest-like JSON files.
     provider_cache_manifest_path: str = "data/cache/providers"
+    #: Restore-test metadata written by deployment runbooks.
+    restore_test_metadata_path: str = "deploy/restore-last-tested.json"
 
     @property
     def is_development(self) -> bool:
@@ -82,6 +98,10 @@ class Settings:
     def is_production(self) -> bool:
         return self.environment.strip().lower() == "production"
 
+    @property
+    def requires_oidc_auth(self) -> bool:
+        return self.auth_mode.strip().lower() in {"oidc", "strict_oidc", "production_oidc"}
+
     def allows_legacy_tenant_header(self) -> bool:
         """True when unauthenticated ``X-Tenant-Id`` access is permitted."""
         return self.is_development and not self.is_production
@@ -89,8 +109,12 @@ class Settings:
 
 def get_settings() -> Settings:
     """Build :class:`Settings` from the environment (used as a FastAPI default)."""
+    environment = os.environ.get("RECLASS_API_ENV", "development")
+    is_prod = environment.strip().lower() == "production"
+    preflight_env = os.environ.get("RECLASS_PREFLIGHT_ON_STARTUP")
+    db_preflight_env = os.environ.get("RECLASS_PREFLIGHT_CHECK_DATABASE")
     return Settings(
-        environment=os.environ.get("RECLASS_API_ENV", "development"),
+        environment=environment,
         db_name=os.environ.get("RECLASS_DB", "reclass_dev"),
         db_role=os.environ.get("RECLASS_DB_ROLE") or None,
         tenant_header=os.environ.get("RECLASS_TENANT_HEADER", "X-Tenant-Id"),
@@ -100,16 +124,31 @@ def get_settings() -> Settings:
         oidc_jwks_url=os.environ.get("RECLASS_OIDC_JWKS_URL", ""),
         oidc_jwks=_parse_jwks(os.environ.get("RECLASS_OIDC_JWKS")),
         api_keys=_parse_api_keys(os.environ.get("RECLASS_API_KEYS")),
+        auth_mode=os.environ.get("RECLASS_AUTH_MODE") or ("oidc" if is_prod else "auto"),
         audit_backend=os.environ.get("RECLASS_AUDIT_BACKEND", "memory"),
+        audit_retention_days=int(os.environ.get("RECLASS_AUDIT_RETENTION_DAYS", "365")),
         legacy_default_roles=_parse_roles(os.environ.get("RECLASS_LEGACY_ROLES")),
         audit_max_entries=int(os.environ.get("RECLASS_AUDIT_MAX_ENTRIES", "10000")),
-        preflight_on_startup=os.environ.get("RECLASS_PREFLIGHT_ON_STARTUP", "").strip().lower()
-        in {"1", "true", "yes"},
+        rate_limit_per_minute=int(os.environ.get("RECLASS_RATE_LIMIT_PER_MINUTE", "600" if is_prod else "0")),
+        request_size_limit_bytes=int(os.environ.get("RECLASS_REQUEST_SIZE_LIMIT_BYTES", "1048576" if is_prod else "0")),
+        preflight_on_startup=(
+            is_prod
+            if preflight_env is None
+            else preflight_env.strip().lower() in {"1", "true", "yes"}
+        ),
+        preflight_check_database=(
+            is_prod
+            if db_preflight_env is None
+            else db_preflight_env.strip().lower() in {"1", "true", "yes"}
+        ),
         reference_metadata_path=os.environ.get(
             "RECLASS_REFERENCE_METADATA", "data/reference/GRCh38.fa.meta.json"
         ),
         provider_cache_manifest_path=os.environ.get(
             "RECLASS_PROVIDER_CACHE_MANIFEST", "data/cache/providers"
+        ),
+        restore_test_metadata_path=os.environ.get(
+            "RECLASS_RESTORE_TEST_METADATA", "deploy/restore-last-tested.json"
         ),
     )
 
@@ -147,10 +186,20 @@ def _json_file_ok(path: Path, required_keys: Tuple[str, ...]) -> bool:
     return isinstance(data, dict) and all(data.get(k) not in (None, "") for k in required_keys)
 
 
+def _json_file(path: Path) -> Dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _provider_manifest_ok(path: Path) -> bool:
     if path.is_file():
         return _json_file_ok(path, ("source", "version", "sha256")) or _json_file_ok(
             path, ("provider",)
+        ) or _json_file_ok(
+            path, ("source", "source_version", "checksum")
         )
     if not path.is_dir():
         return False
@@ -163,6 +212,91 @@ def _provider_manifest_ok(path: Path) -> bool:
         )
     ]
     return any(_provider_manifest_ok(p) for p in candidates)
+
+
+def _provider_manifest_count(path: Path) -> int:
+    if path.is_file():
+        return 1 if _provider_manifest_ok(path) else 0
+    if not path.is_dir():
+        return 0
+    return sum(
+        1
+        for p in path.iterdir()
+        if p.is_file()
+        and (
+            p.name.endswith(".manifest.json")
+            or p.name == "manifest.json"
+            or p.name.endswith("_manifest.json")
+        )
+        and _provider_manifest_ok(p)
+    )
+
+
+def _database_preflight_failures(settings: Settings) -> list[PreflightFailure]:
+    failures: list[PreflightFailure] = []
+    try:
+        from db.apply import discover_migrations
+        from storage.db import connect
+
+        with connect(settings.db_name, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                if settings.db_role:
+                    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (settings.db_role,))
+                    if cur.fetchone() is None:
+                        failures.append(PreflightFailure(
+                            "database_role",
+                            f"configured RECLASS_DB_ROLE does not exist: {settings.db_role}",
+                        ))
+                expected_rls = (
+                    ("clinical", "patient"),
+                    ("clinical", "classification"),
+                    ("clinical", "alert"),
+                    ("clinical", "audit_log"),
+                )
+                for schema, table in expected_rls:
+                    cur.execute(
+                        """
+                        SELECT c.relrowsecurity
+                          FROM pg_class c
+                          JOIN pg_namespace n ON n.oid = c.relnamespace
+                         WHERE n.nspname = %s AND c.relname = %s
+                        """,
+                        (schema, table),
+                    )
+                    row = cur.fetchone()
+                    if row is None or not row["relrowsecurity"]:
+                        failures.append(PreflightFailure(
+                            "row_level_security",
+                            f"RLS is not enabled for {schema}.{table}",
+                        ))
+                migrations = discover_migrations()
+                if migrations:
+                    latest = migrations[-1]
+                    cur.execute(
+                        """
+                        SELECT checksum_sha256, status
+                          FROM public.reclass_schema_migrations
+                         WHERE migration_id = %s
+                        """,
+                        (latest.migration_id,),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        failures.append(PreflightFailure(
+                            "migration_ledger",
+                            f"latest migration is not recorded: {latest.filename}",
+                        ))
+                    elif row["checksum_sha256"] != latest.checksum_sha256 or row["status"] != "applied":
+                        failures.append(PreflightFailure(
+                            "migration_ledger",
+                            f"migration ledger mismatch for {latest.filename}",
+                        ))
+    except Exception as exc:
+        failures.append(PreflightFailure(
+            "database_preflight",
+            f"database/RLS/migration-ledger checks failed: {exc}",
+        ))
+    return failures
 
 
 def preflight_check(
@@ -191,7 +325,13 @@ def preflight_check(
             "missing required production environment variables: " + ", ".join(missing),
         ))
 
-    if settings.is_production and not (
+    if settings.is_production and not settings.requires_oidc_auth:
+        failures.append(PreflightFailure(
+            "production_auth_mode",
+            "production requires RECLASS_AUTH_MODE=oidc so HS256/API-key fallback is disabled",
+        ))
+
+    if (settings.is_production or settings.requires_oidc_auth) and not (
         settings.oidc_issuer and (settings.oidc_jwks_url or settings.oidc_jwks)
     ):
         failures.append(PreflightFailure(
@@ -230,7 +370,68 @@ def preflight_check(
             f"missing provider-cache manifest at {provider_manifest}",
         ))
 
+    if settings.is_production and settings.preflight_check_database:
+        failures.extend(_database_preflight_failures(settings))
+
     return tuple(failures)
+
+
+def readiness_report(
+    settings: Settings,
+    *,
+    base_path: str | Path | None = None,
+    environ: Dict[str, str] | None = None,
+) -> Dict[str, Any]:
+    """Return structured readiness details for health endpoints and onboarding.
+
+    ``preflight_check`` remains the fail/raise API. This companion exposes the
+    same checks plus non-fatal context that operators want on dashboards.
+    """
+    base = Path(base_path) if base_path is not None else Path.cwd()
+    failures = preflight_check(settings, environ=environ, base_path=base)
+    by_name = {failure.name: failure.message for failure in failures}
+    reference_path = _resolve_path(settings.reference_metadata_path, base)
+    provider_path = _resolve_path(settings.provider_cache_manifest_path, base)
+    restore_path = _resolve_path(settings.restore_test_metadata_path, base)
+    restore_meta = _json_file(restore_path)
+    restore_age_days = None
+    if restore_meta and restore_meta.get("tested_at"):
+        try:
+            tested = datetime.fromisoformat(str(restore_meta["tested_at"]).replace("Z", "+00:00"))
+            restore_age_days = round((datetime.now(timezone.utc) - tested).total_seconds() / 86400, 2)
+        except ValueError:
+            restore_age_days = None
+    checks = {
+        "required_environment_variables": "ok" if "required_environment_variables" not in by_name else "failed",
+        "production_auth_mode": "ok" if "production_auth_mode" not in by_name else "failed",
+        "oidc_jwks": "ok" if "oidc_jwks_configuration" not in by_name else "failed",
+        "audit_backend": "ok" if "audit_backend" not in by_name else "failed",
+        "database_role": "ok" if "database_role" not in by_name else "failed",
+        "reference_metadata": "ok" if "reference_fasta_metadata" not in by_name else "failed",
+        "provider_cache_manifests": "ok" if "provider_cache_manifest" not in by_name else "failed",
+        "database_rls_migration_ledger": (
+            "not_checked"
+            if not settings.preflight_check_database
+            else "ok"
+            if not any(name in by_name for name in ("database_preflight", "row_level_security", "migration_ledger"))
+            else "failed"
+        ),
+    }
+    return {
+        "status": "ok" if not failures else "failed",
+        "environment": settings.environment,
+        "auth_mode": settings.auth_mode,
+        "checks": checks,
+        "failures": [failure.to_dict() for failure in failures],
+        "artifacts": {
+            "reference_metadata_path": str(reference_path),
+            "reference_metadata_present": reference_path.is_file(),
+            "provider_cache_manifest_path": str(provider_path),
+            "provider_cache_manifest_count": _provider_manifest_count(provider_path),
+            "restore_test_metadata_path": str(restore_path),
+            "restore_test_age_days": restore_age_days,
+        },
+    }
 
 
 def require_preflight(

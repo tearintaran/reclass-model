@@ -21,7 +21,7 @@ clinical traffic and run in CI without a database.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from engine.scoring import EvidenceEvent, classify
@@ -35,7 +35,7 @@ def _jsonable(value: Any) -> Any:
     """Coerce DB/uuid/datetime values into JSON-friendly Python primitives."""
     if isinstance(value, (uuid.UUID,)):
         return str(value)
-    if isinstance(value, datetime):
+    if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, dict):
         return {k: _jsonable(v) for k, v in value.items()}
@@ -99,9 +99,63 @@ class ClinicalStore:
     def update_alert_state(self, *, tenant_id: str, alert_id: str, state: str) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def update_alert_triage(
+        self,
+        *,
+        tenant_id: str,
+        alert_id: str,
+        triage: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        raise NotImplementedError
+
     def list_reanalysis_events(
         self, *, tenant_id: str, variant_key: Optional[str] = None
     ) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def approve_release(
+        self,
+        *,
+        tenant_id: str,
+        classification_id: str,
+        signoff_packet: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def transition_release_state(
+        self,
+        *,
+        tenant_id: str,
+        classification_id: str,
+        next_state: str,
+        release_notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def release_signoff_ledger(
+        self, *, tenant_id: str, classification_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def list_reanalysis_queue(self, *, tenant_id: str) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def list_reanalysis_runs(self, *, tenant_id: str) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_reanalysis_policy(self, *, tenant_id: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def set_reanalysis_policy(self, *, tenant_id: str, policy: Dict[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def record_amended_report(
+        self,
+        *,
+        tenant_id: str,
+        classification_id: str,
+        lifecycle: Dict[str, Any],
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
 
@@ -229,6 +283,22 @@ class DbClinicalStore(ClinicalStore):
             with self._session(conn, tenant_id) as cur:
                 return _jsonable(al.update_alert_state(cur, alert_id, state=state))
 
+    def update_alert_triage(self, *, tenant_id, alert_id, triage):
+        from storage import alerts as al
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return _jsonable(al.update_alert_triage(
+                    cur,
+                    alert_id,
+                    owner=triage.get("owner"),
+                    sla_due_at=triage.get("sla_due_at"),
+                    severity=triage.get("severity"),
+                    resolution_rationale=triage.get("resolution_rationale"),
+                    re_review_outcome=triage.get("re_review_outcome"),
+                    notification_state=triage.get("notification_state"),
+                ))
+
     def list_reanalysis_events(self, *, tenant_id, variant_key=None):
         from storage import alerts as al
 
@@ -238,6 +308,122 @@ class DbClinicalStore(ClinicalStore):
                 if variant_key and variant_id is None:
                     return []
                 return [_jsonable(r) for r in al.list_reanalysis_events(cur, variant_id=variant_id)]
+
+    def approve_release(self, *, tenant_id, classification_id, signoff_packet):
+        from storage import classifications as cls
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return serialize_receipt(cls.record_release_signoff(
+                    cur, classification_id, signoff_packet=signoff_packet
+                ))
+
+    def transition_release_state(self, *, tenant_id, classification_id, next_state, release_notes=None):
+        from storage import classifications as cls
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return serialize_receipt(cls.update_release_state(
+                    cur, classification_id, next_state=next_state, release_notes=release_notes
+                ))
+
+    def release_signoff_ledger(self, *, tenant_id, classification_id=None):
+        from storage import classifications as cls
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return [_jsonable(row) for row in cls.release_signoff_ledger(
+                    cur, classification_id=classification_id
+                )]
+
+    def list_reanalysis_queue(self, *, tenant_id):
+        from ops import queue as opsq
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return [_jsonable(row) for row in opsq.list_queue(cur)]
+
+    def list_reanalysis_runs(self, *, tenant_id):
+        from ops import run_report as opsr
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return [_jsonable(row) for row in opsr.list_runs(cur)]
+
+    def get_reanalysis_policy(self, *, tenant_id):
+        from ops import scheduler as opss
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return _jsonable(opss.get_tenant_policy(cur, tenant_id=tenant_id))
+
+    def set_reanalysis_policy(self, *, tenant_id, policy):
+        from ops import scheduler as opss
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                return _jsonable(opss.upsert_tenant_policy(
+                    cur,
+                    tenant_id=tenant_id,
+                    policy=opss.TenantReanalysisPolicy.from_dict(policy),
+                ))
+
+    def record_amended_report(self, *, tenant_id, classification_id, lifecycle):
+        from psycopg.types.json import Jsonb
+
+        with self._conn() as conn:
+            with self._session(conn, tenant_id) as cur:
+                report = lifecycle["report"]
+                payload = lifecycle["payload"]
+                cur.execute(
+                    """
+                    INSERT INTO clinical.amended_report (
+                        tenant_id, classification_id, report_id, previous_report_id,
+                        state, amendment_reason, payload_sha256, payload,
+                        notification_state
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (
+                        tenant_id,
+                        classification_id,
+                        report["report_id"],
+                        report.get("previous_report_id"),
+                        report["state"],
+                        report.get("amendment_reason"),
+                        report["payload_sha256"],
+                        Jsonb(payload),
+                        report.get("notification_state", "pending"),
+                    ),
+                )
+                amended = cur.fetchone()
+                notifications = []
+                for notification in lifecycle.get("notifications", []):
+                    cur.execute(
+                        """
+                        INSERT INTO clinical.clinician_notification (
+                            tenant_id, amended_report_id, classification_id, recipient,
+                            channel, notification_state, rationale
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            tenant_id,
+                            amended["amended_report_id"],
+                            classification_id,
+                            notification["recipient"],
+                            notification.get("channel", "ehr"),
+                            notification.get("notification_state", "pending"),
+                            notification.get("rationale"),
+                        ),
+                    )
+                    notifications.append(_jsonable(cur.fetchone()))
+                # webhook-seam: emit report.amended and clinician_notification.pending.
+                return {
+                    "report": _jsonable(amended),
+                    "notifications": notifications,
+                    "payload": payload,
+                }
 
     @staticmethod
     def _variant_id_for_key(cur, variant_key: str) -> Optional[str]:
@@ -286,6 +472,10 @@ class InMemoryClinicalStore(ClinicalStore):
         self._classifications: Dict[str, List[Dict[str, Any]]] = {}
         self._alerts: Dict[str, List[Dict[str, Any]]] = {}
         self._reanalysis_events: Dict[str, List[Dict[str, Any]]] = {}
+        self._reanalysis_queue: Dict[str, List[Dict[str, Any]]] = {}
+        self._reanalysis_runs: Dict[str, List[Dict[str, Any]]] = {}
+        self._reanalysis_policies: Dict[str, Dict[str, Any]] = {}
+        self._amended_reports: Dict[str, List[Dict[str, Any]]] = {}
 
     # -- helpers ------------------------------------------------------------ #
     def _tenant_rows(self, table: Dict[str, List[Dict[str, Any]]], tenant_id: str):
@@ -317,6 +507,26 @@ class InMemoryClinicalStore(ClinicalStore):
             "evidence": _jsonable(evidence) if evidence is not None else None,
             "signed_off_by": None,
             "signed_off_at": None,
+            "release_state": "review_pending",
+            "signoff_packet": {},
+            "release_scope": {},
+            "config_hash": None,
+            "source_snapshots": {},
+            "validation_report_id": None,
+            "conflict_policy_disposition": None,
+            "reviewer_credential": None,
+            "institutional_authorization": None,
+            "effective_date": None,
+            "re_review_date": None,
+            "assigned_reviewer": None,
+            "second_reviewer": None,
+            "second_review_at": None,
+            "override_rationale": None,
+            "release_notes": None,
+            "approved_at": None,
+            "released_at": None,
+            "withdrawn_at": None,
+            "rereview_required_at": None,
             "created_at": _now(),
         }
         self._tenant_rows(self._classifications, tenant_id).append(receipt)
@@ -423,11 +633,174 @@ class InMemoryClinicalStore(ClinicalStore):
                 return _jsonable(r)
         raise LookupError(f"alert {alert_id} not visible to this session")
 
+    def update_alert_triage(self, *, tenant_id, alert_id, triage):
+        from storage.alerts import ALERT_SEVERITIES, NOTIFICATION_STATES
+
+        if triage.get("severity") is not None and triage["severity"] not in ALERT_SEVERITIES:
+            raise ValueError(
+                f"unknown alert severity {triage['severity']!r}; expected one of {ALERT_SEVERITIES}"
+            )
+        if (
+            triage.get("notification_state") is not None
+            and triage["notification_state"] not in NOTIFICATION_STATES
+        ):
+            raise ValueError(
+                "unknown notification state "
+                f"{triage['notification_state']!r}; expected one of {NOTIFICATION_STATES}"
+            )
+        for r in self._tenant_rows(self._alerts, tenant_id):
+            if r["alert_id"] == alert_id:
+                mapping = {
+                    "owner": "triage_owner",
+                    "sla_due_at": "sla_due_at",
+                    "severity": "severity",
+                    "resolution_rationale": "resolution_rationale",
+                    "re_review_outcome": "re_review_outcome",
+                    "notification_state": "notification_state",
+                }
+                for src, dst in mapping.items():
+                    if triage.get(src) is not None:
+                        r[dst] = triage[src]
+                r["triaged_at"] = _now()
+                return _jsonable(r)
+        raise LookupError(f"alert {alert_id} not visible to this session")
+
     def list_reanalysis_events(self, *, tenant_id, variant_key=None):
         rows = self._tenant_rows(self._reanalysis_events, tenant_id)
         if variant_key is not None:
             rows = [r for r in rows if r["variant_key"] == variant_key]
         return [_jsonable(r) for r in rows]
+
+    def approve_release(self, *, tenant_id, classification_id, signoff_packet):
+        from validation.signoff import APPROVED_FOR_RELEASE, SignOffPacket
+
+        packet = SignOffPacket.from_dict(signoff_packet)
+        for r in self._tenant_rows(self._classifications, tenant_id):
+            if r["classification_id"] == classification_id:
+                now = _now()
+                r.update({
+                    "signed_off_by": packet.signed_off_by,
+                    "signed_off_at": now,
+                    "release_state": APPROVED_FOR_RELEASE,
+                    "signoff_packet": packet.to_dict(),
+                    "release_scope": packet.clinical_scope.to_dict(),
+                    "config_hash": packet.config_hash,
+                    "source_snapshots": packet.source_snapshots,
+                    "validation_report_id": packet.validation_report_id,
+                    "conflict_policy_disposition": packet.conflict_policy_disposition,
+                    "reviewer_credential": packet.reviewer_credential,
+                    "institutional_authorization": packet.institutional_authorization,
+                    "effective_date": packet.effective_date,
+                    "re_review_date": packet.re_review_date,
+                    "assigned_reviewer": packet.reviewer_assignment,
+                    "second_reviewer": packet.second_reviewer,
+                    "second_review_at": packet.second_review_at,
+                    "override_rationale": packet.override_rationale,
+                    "release_notes": packet.release_notes,
+                    "approved_at": now,
+                })
+                return serialize_receipt(r)
+        raise LookupError(f"classification {classification_id} not visible")
+
+    def transition_release_state(self, *, tenant_id, classification_id, next_state, release_notes=None):
+        from validation.signoff import (
+            APPROVED_FOR_RELEASE,
+            RELEASED,
+            RE_REVIEW_REQUIRED,
+            WITHDRAWN,
+            transition_release_state,
+        )
+
+        for r in self._tenant_rows(self._classifications, tenant_id):
+            if r["classification_id"] == classification_id:
+                transition_release_state(r.get("release_state") or "review_pending", next_state)
+                r["release_state"] = next_state
+                if release_notes is not None:
+                    r["release_notes"] = release_notes
+                stamp = {
+                    APPROVED_FOR_RELEASE: "approved_at",
+                    RELEASED: "released_at",
+                    WITHDRAWN: "withdrawn_at",
+                    RE_REVIEW_REQUIRED: "rereview_required_at",
+                }.get(next_state)
+                if stamp:
+                    r[stamp] = _now()
+                return serialize_receipt(r)
+        raise LookupError(f"classification {classification_id} not visible")
+
+    def release_signoff_ledger(self, *, tenant_id, classification_id=None):
+        rows = self._tenant_rows(self._classifications, tenant_id)
+        out = []
+        for r in rows:
+            if classification_id is not None and r["classification_id"] != classification_id:
+                continue
+            if not r.get("signoff_packet"):
+                continue
+            out.append({
+                "classification_id": r["classification_id"],
+                "release_state": r.get("release_state"),
+                "signed_off_by": r.get("signed_off_by"),
+                "signed_off_at": r.get("signed_off_at"),
+                "reviewer_credential": r.get("reviewer_credential"),
+                "institutional_authorization": r.get("institutional_authorization"),
+                "validation_report_id": r.get("validation_report_id"),
+                "config_hash": r.get("config_hash"),
+                "release_scope": r.get("release_scope"),
+                "conflict_policy_disposition": r.get("conflict_policy_disposition"),
+                "second_reviewer": r.get("second_reviewer"),
+                "release_notes": r.get("release_notes"),
+            })
+        return [_jsonable(row) for row in out]
+
+    def list_reanalysis_queue(self, *, tenant_id):
+        return [_jsonable(row) for row in self._tenant_rows(self._reanalysis_queue, tenant_id)]
+
+    def list_reanalysis_runs(self, *, tenant_id):
+        return [_jsonable(row) for row in self._tenant_rows(self._reanalysis_runs, tenant_id)]
+
+    def get_reanalysis_policy(self, *, tenant_id):
+        from ops.scheduler import TenantReanalysisPolicy
+
+        return _jsonable(self._reanalysis_policies.get(tenant_id) or {
+            "tenant_id": tenant_id,
+            **TenantReanalysisPolicy().to_dict(),
+        })
+
+    def set_reanalysis_policy(self, *, tenant_id, policy):
+        from ops.scheduler import TenantReanalysisPolicy
+
+        row = {
+            "policy_id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,
+            **TenantReanalysisPolicy.from_dict(policy).to_dict(),
+            "updated_at": _now(),
+        }
+        self._reanalysis_policies[tenant_id] = row
+        return _jsonable(row)
+
+    def record_amended_report(self, *, tenant_id, classification_id, lifecycle):
+        report = {
+            "amended_report_id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,
+            "classification_id": classification_id,
+            **lifecycle["report"],
+            "created_at": _now(),
+        }
+        notifications = []
+        for notification in lifecycle.get("notifications", []):
+            notifications.append({
+                "notification_id": str(uuid.uuid4()),
+                "tenant_id": tenant_id,
+                **notification,
+                "created_at": _now(),
+            })
+        record = {
+            "report": report,
+            "notifications": notifications,
+            "payload": lifecycle["payload"],
+        }
+        self._tenant_rows(self._amended_reports, tenant_id).append(record)
+        return _jsonable(record)
 
     # -- internal write helpers --------------------------------------------- #
     def _insert_alert(self, tenant_id, variant_key, old_tier, new_tier) -> str:
@@ -440,6 +813,13 @@ class InMemoryClinicalStore(ClinicalStore):
             "new_tier": new_tier,
             "serious": is_serious_crossing(old_tier, new_tier),
             "state": "open",
+            "triage_owner": None,
+            "sla_due_at": None,
+            "severity": "critical" if is_serious_crossing(old_tier, new_tier) else "standard",
+            "resolution_rationale": None,
+            "re_review_outcome": None,
+            "notification_state": "pending",
+            "triaged_at": None,
             "resolved_at": None,
             "created_at": _now(),
         }

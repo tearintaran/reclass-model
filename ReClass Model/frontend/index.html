@@ -31,12 +31,79 @@
   </section>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="workflow">Workflow</button>
+    <button class="tab active" data-tab="worklist">Worklist</button>
+    <button class="tab" data-tab="workflow">Workflow</button>
     <button class="tab" data-tab="drafts">Drafts</button>
     <button class="tab" data-tab="alerts">Alerts</button>
   </nav>
 
-  <main id="tab-workflow" class="tab-panel active">
+  <main id="tab-worklist" class="tab-panel active">
+    <section class="panel">
+      <h2>Queue</h2>
+      <div id="wl-metrics" class="wl-metrics region"></div>
+      <div class="wl-filters">
+        <label>Status
+          <select id="wl-status">
+            <option value="">All</option>
+            <option value="draft">Draft</option>
+            <option value="in_review">In review</option>
+            <option value="signed">Signed</option>
+            <option value="released">Released</option>
+            <option value="on_hold">On hold</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
+        <label>Priority
+          <select id="wl-priority">
+            <option value="">All</option>
+            <option value="stat">STAT</option>
+            <option value="urgent">Urgent</option>
+            <option value="routine">Routine</option>
+          </select>
+        </label>
+        <label class="checkbox">
+          <input id="wl-unassigned" type="checkbox"> Unassigned only
+        </label>
+        <label>Search
+          <input id="wl-search" type="search" placeholder="accession, provider, test code">
+        </label>
+        <button id="btn-wl-refresh">Refresh queue</button>
+      </div>
+      <div class="wl-bulkbar-row">
+        <div id="wl-bulkbar" class="wl-bulkbar"></div>
+        <span id="wl-bulk-status" class="status"></span>
+      </div>
+      <div id="wl-queue" class="region"></div>
+    </section>
+
+    <section class="panel">
+      <h2>New case</h2>
+      <p class="hint">PHI fields (MRN) are stored access-controlled and never shown
+        in the de-identified queue.</p>
+      <div class="grid">
+        <label>Accession <input id="wl-accession" placeholder="ACC-0001"></label>
+        <label>Priority
+          <select id="wl-new-priority">
+            <option value="routine">Routine</option>
+            <option value="urgent">Urgent</option>
+            <option value="stat">STAT</option>
+          </select>
+        </label>
+        <label>Ordering provider <input id="wl-provider" placeholder="Dr. Order, MD"></label>
+        <label>Test code <input id="wl-test-code" placeholder="WES, panel-123"></label>
+        <label>Patient MRN (PHI) <input id="wl-mrn" placeholder="optional"></label>
+      </div>
+      <button id="btn-wl-create">Create case</button>
+      <span id="wl-create-status" class="status"></span>
+    </section>
+
+    <section class="panel">
+      <h2>Case detail</h2>
+      <div id="wl-detail" class="region"></div>
+    </section>
+  </main>
+
+  <main id="tab-workflow" class="tab-panel">
     <section class="panel">
       <h2>Variant</h2>
       <div class="grid variant-grid">

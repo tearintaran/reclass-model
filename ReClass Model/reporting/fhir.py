@@ -121,6 +121,7 @@ REPORT_STATE_TRANSITIONS = {
     REPORT_STATE_FINAL: {REPORT_STATE_AMENDED},
     REPORT_STATE_AMENDED: {REPORT_STATE_AMENDED},
 }
+NOTIFICATION_STATES = ("not_required", "pending", "sent", "acknowledged", "failed")
 
 
 # --------------------------------------------------------------------------- #
@@ -806,3 +807,76 @@ def amend_outbound_payload(
         effective=effective if effective is not None else request.get("effective"),
         signer=signer if signer is not None else request.get("signer"),
     )
+
+
+def amended_report_record(
+    outbound_payload: Mapping[str, Any],
+    *,
+    classification_id: str,
+    notification_state: str = "pending",
+) -> Dict[str, Any]:
+    """Build structured lifecycle state for an outbound final/amended FHIR payload."""
+    state = str(outbound_payload["state"])
+    if state not in REPORT_STATES:
+        raise ValueError(f"unknown report state {state!r}; expected one of {REPORT_STATES}")
+    request = dict(outbound_payload["render_request"])
+    return {
+        "classification_id": str(classification_id),
+        "report_id": str(outbound_payload["report_id"]),
+        "previous_report_id": request.get("previous_report_id"),
+        "state": state,
+        "amendment_reason": request.get("amendment_reason"),
+        "payload_id": outbound_payload["payload_id"],
+        "payload_sha256": outbound_payload["payload_sha256"],
+        "content_type": outbound_payload["content_type"],
+        "notification_state": notification_state,
+    }
+
+
+def clinician_notification_record(
+    *,
+    classification_id: str,
+    report_id: str,
+    recipient: str,
+    channel: str = "ehr",
+    notification_state: str = "pending",
+    rationale: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a JSON-native clinician-notification tracking row."""
+    if notification_state not in NOTIFICATION_STATES:
+        raise ValueError(
+            f"unknown notification state {notification_state!r}; expected one of {NOTIFICATION_STATES}"
+        )
+    return {
+        "classification_id": str(classification_id),
+        "report_id": str(report_id),
+        "recipient": recipient,
+        "channel": channel,
+        "notification_state": notification_state,
+        "rationale": rationale,
+    }
+
+
+def lis_ehr_lifecycle_adapter(
+    outbound_payload: Mapping[str, Any],
+    *,
+    classification_id: str,
+    recipients: Optional[List[str]] = None,
+    channel: str = "ehr",
+) -> Dict[str, Any]:
+    """Build the LIS/EHR lifecycle envelope around a FHIR outbound payload."""
+    report = amended_report_record(outbound_payload, classification_id=classification_id)
+    notifications = [
+        clinician_notification_record(
+            classification_id=classification_id,
+            report_id=report["report_id"],
+            recipient=recipient,
+            channel=channel,
+        )
+        for recipient in recipients or []
+    ]
+    return {
+        "report": report,
+        "notifications": notifications,
+        "payload": outbound_payload,
+    }

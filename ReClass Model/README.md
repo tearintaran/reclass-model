@@ -10,6 +10,24 @@ human review or clinical sign-off.
 
 ## Current Status
 
+Latest local review: 2026-06-19.
+
+The proof-of-concept engine and service scaffold are healthy locally: the
+unit/integration suite reports 877 passing tests, `ruff` and scoped `mypy` pass,
+the reviewer frontend browser harness passes 52/52 checks, and the local GRCh38
+reference cache is loadable with matching Ensembl release-110 metadata. The local
+test run skipped 31 PostgreSQL-backed storage/RLS tests because no PostgreSQL
+server was running; the repository CI is configured to run those against a
+PostgreSQL service.
+
+The 2026-06-19 scalable-product feature layer is built and merged on top of the
+engine: an evidence workbench with coverage/curation and batch/VCF/CSV import; an
+enforced release-gate sign-off state machine, exportable validation packets, and
+continuous-reanalysis operations; and an enterprise platform/security layer
+(fail-closed preflight, OIDC-only auth, rate limiting, audit retention, SLO metrics,
+webhook delivery, and tenant administration/onboarding). None of it changes the
+scoring math in `engine/`.
+
 Implemented and runnable now:
 
 - Deterministic scoring engine in `engine/scoring.py`.
@@ -83,13 +101,46 @@ Implemented and runnable now:
   conflict-policy) that enqueue affected variants with an auditable run manifest in
   `ops/scheduler.py` and `ops/queue.py`.
 - Startup/preflight production-readiness checks in `api/settings.py` covering
-  required env vars, OIDC/JWKS, audit backend, DB role, reference-FASTA metadata,
-  and provider-cache manifests, each failing with a named error.
+  required env vars, OIDC/JWKS, audit backend, DB role/RLS, reference-FASTA metadata,
+  provider-cache manifests, and migration-ledger consistency, each failing with a
+  named error. In production the preflight **fails closed**, and an OIDC-only auth
+  mode disables HS256/API-key fallback.
+- Evidence workbench, coverage, and curation in `evidence/workbench.py`,
+  `evidence/coverage.py`, and `evidence/curation.py` with persistence in
+  `storage/evidence.py`: reviewer-entered structured evidence (provenance:
+  source/version/checksum/access-date/reviewer/expiry), blocked-case coverage
+  roll-ups by gene/VCEP/disease/variant-class/provider, and curation queues for
+  unmatched/ambiguous identity, missing transcript, missing cohort denominator, and
+  pathogenic/benign conflicts.
+- Validated import in `ingest/batch_import.py`, `ingest/vcf_import.py`, and
+  `ingest/csv_import.py`: PHI-scrubbing upstream-evidence batch import plus
+  VCF/CSV/TSV variant import with identity normalization, duplicate detection,
+  optional evidence-resolution preview, and dry-run reporting.
+- Release-gate enforcement in `validation/signoff.py`, `validation/release_gate.py`,
+  and `validation/release_packet.py`: the five-state release machine
+  (`review_pending`/`approved_for_release`/`released`/`withdrawn`/`re-review_required`),
+  structured sign-off packets (scope, config hash, commit, snapshots, validation-report
+  id, conflict disposition, credential, authorization, effective/re-review dates),
+  scope/preflight/discordance blocking, and an exportable validation packet.
+- Reanalysis operations and alert triage via `monitoring/reanalysis.py`,
+  `monitoring/diff.py`, `ops/`, `storage/classifications.py`, and `storage/alerts.py`:
+  operator views (queue status, run manifests, reason codes, provider-cache
+  readiness, same-tier changes), per-tenant reanalysis policies, alert
+  owner/SLA/severity/resolution/notification fields, and amended-report +
+  clinician-notification tracking with an LIS/EHR adapter in `reporting/fhir.py`.
+- Enterprise platform/security in `api/ratelimit.py` (rate + request-size limits),
+  `api/audit.py` (retention policy, structured security events),
+  `api/observability.py` (SLO metrics), `api/webhooks.py` + `storage/webhooks.py` +
+  `api/routers/webhooks.py` (signed webhook delivery with retry and an `emit_event`
+  seam), `storage/admin.py` + `api/routers/admin.py` (tenant administration),
+  `ops/onboarding.py` (pre-production readiness), and `api/generated_client.py`
+  (typed client generated from the pinned OpenAPI contract).
 - A GitHub Actions CI pipeline (`.github/workflows/ci.yml`) running PostgreSQL-backed
   tests, migration apply/restore rehearsal, Docker image build, generated
   validation-report artifacts, headless frontend checks, and optional FHIR profile
   validation.
-- 781 tests passing in the current environment.
+- 877 tests passing in the 2026-06-19 local review, with 31 PostgreSQL-backed
+  storage/RLS tests skipped locally when no PostgreSQL server was available.
 
 Important limitations:
 
@@ -113,6 +164,13 @@ Important limitations:
   service surfaces, but nothing here is a production clinical deployment until
   the documented operational, database, and credentialed sign-off steps are
   completed.
+- The 2026-06-19 scalable-product feature layer (evidence workbench and evidence
+  operations, release-gate workflow enforcement, continuous reanalysis operations,
+  enterprise deployment/security, and LIS/EHR/API integration surfaces) is built and
+  tested, but it is product/operations machinery: it still depends on validated
+  upstream evidence, real clinical sign-off, data licensing, and a production
+  identity-provider/deployment rollout before any real-world use. The remaining
+  non-code gates are tracked in `../gap.md` and `../roadmap.md`.
 
 ## Quick Start
 
@@ -137,7 +195,7 @@ Expected current outcomes:
 
 | Command | Expected result |
 |---|---|
-| Unit/integration tests | 781 tests pass in the current environment |
+| Unit/integration tests | 877 tests pass in the current environment |
 | `validation/harness.py` | Synthetic gate PASS |
 | `validation/harness.py clingen_real_v1` | Real ClinGen gate PASS |
 | `validation/harness.py clinvar_real_v1` | Raw ClinVar gate FAIL, exposing sparse evidence |
@@ -291,7 +349,6 @@ not available.
 ReClass Model/
   README.md
   manifest.md
-  limitations.md
   00-overview.md
   00-orchestrator-agent.md
   pyproject.toml
@@ -322,6 +379,9 @@ ReClass Model/
     upstream.py
     cache_manifest.py
     enrich_clinvar.py
+    workbench.py
+    coverage.py
+    curation.py
   monitoring/
     diff.py
     reanalysis.py
@@ -330,6 +390,7 @@ ReClass Model/
     scheduler.py
     run_report.py
     repo_guard.py
+    onboarding.py
   api/
     app.py
     auth.py
@@ -337,6 +398,8 @@ ReClass Model/
     oidc.py
     audit.py
     observability.py
+    ratelimit.py
+    webhooks.py
     deps.py
     settings.py
     service.py
@@ -346,8 +409,10 @@ ReClass Model/
     openapi.json
     openapi_contract.py
     cookbook_examples.py
+    generated_client.py
     requirements.txt
     routers/
+      admin.py
       alerts.py
       audit.py
       classifications.py
@@ -356,10 +421,14 @@ ReClass Model/
       reanalysis.py
       reports.py
       validation.py
+      webhooks.py
   frontend/
     index.html
     app.js
     styles.css
+    workbench.html
+    workbench.js
+    workbench.css
     tests/
       test.html
   deploy/
@@ -368,6 +437,11 @@ ReClass Model/
     backup.sh
     restore.sh
     migrations/
+      001_audit_log.sql
+      002_classification_evidence.sql
+      003_evidence_workbench.sql
+      004_release_gate_reanalysis.sql
+      005_platform_security.sql
   reporting/
     reviewer.py
     summary.py
@@ -382,6 +456,9 @@ ReClass Model/
     calibration.py
     conflict_policy.py
     fixture_splits.py
+    signoff.py
+    release_gate.py
+    release_packet.py
     plots.py
     harness.py
     fixtures/
@@ -395,12 +472,17 @@ ReClass Model/
     cohort_to_evidence.py
     hgvs.py
     identity_audit_report.py
+    batch_import.py
+    vcf_import.py
+    csv_import.py
   storage/
     db.py
     classifications.py
     evidence.py
     alerts.py
     verify.py
+    admin.py
+    webhooks.py
   db/
     schema.sql
     apply.py
@@ -414,6 +496,7 @@ ReClass Model/
     auth.md
     release_review.md
     api_cookbook.md
+    evidence_workbench.md
   tests/
   data/
     raw/
@@ -485,10 +568,18 @@ The surviving docs are still useful as architecture notes:
 Read `../gap.md` for the unfinished todo list, and `../roadmap.md` for the forward
 clinical/regulatory pathway.
 
-The reviewer frontend, API auth/RBAC/audit/observability, RS256/JWKS token
-validation, deterministic FHIR serializer, and containerized deployment now exist
-as proof-of-concept surfaces. The highest-value remaining work is clinical/product
-hardening rather than missing core repo modules: credentialed clinical sign-off, a
-formal clinical validation study, data licensing for clinical use, production
-identity-provider rollout and deployment hardening, live LIS/EHR integration, and
-real-world evidence population/calibration for the structured providers.
+The core engine, the reviewer frontend, API auth/RBAC/audit/observability,
+RS256/JWKS token validation, the deterministic FHIR serializer, containerized
+deployment, and the full 2026-06-19 scalable-product feature layer (evidence
+workbench/coverage/curation, batch/VCF/CSV import, enforced release-gate sign-off,
+validation packets, reanalysis operations, alert triage, amended-report/notification
+tracking, fail-closed/OIDC-only platform security, SLO metrics, webhooks, and tenant
+administration/onboarding) all now exist as tested proof-of-concept surfaces.
+
+The highest-value remaining work is therefore **not** missing core repo modules — it
+is clinical, data, regulatory, and infrastructure hardening: credentialed clinical
+sign-off, a formal clinical validation study, data licensing for clinical use,
+production identity-provider rollout and deployment hardening, live LIS/EHR
+integration on top of the existing adapters, and real-world evidence population/
+calibration for the structured providers and the evidence workbench. The optional
+`reclass`-namespace import refactor is the only sizable code cleanup still open.

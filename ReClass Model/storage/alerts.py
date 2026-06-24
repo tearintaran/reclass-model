@@ -69,6 +69,8 @@ def record_rescoring(cur, *, tenant_id: str, variant_id: str, old_tier: str,
 # Alert lifecycle states (mirrors the ``alert_state`` enum in schema.sql) and the
 # allowed forward transitions. ``resolved`` / ``dismissed`` are terminal.
 ALERT_STATES = ("open", "acknowledged", "in_review", "resolved", "dismissed")
+ALERT_SEVERITIES = ("low", "standard", "high", "critical")
+NOTIFICATION_STATES = ("not_required", "pending", "sent", "acknowledged", "failed")
 _TERMINAL_STATES = {"resolved", "dismissed"}
 _ALLOWED_TRANSITIONS = {
     "open": {"acknowledged", "in_review", "resolved", "dismissed"},
@@ -105,6 +107,54 @@ def update_alert_state(cur, alert_id: str, *, state: str) -> Dict[str, Any]:
         "WHERE alert_id = %s RETURNING *",
         (state, alert_id),
     )
+    return cur.fetchone()
+
+
+def update_alert_triage(
+    cur,
+    alert_id: str,
+    *,
+    owner: Optional[str] = None,
+    sla_due_at: Optional[str] = None,
+    severity: Optional[str] = None,
+    resolution_rationale: Optional[str] = None,
+    re_review_outcome: Optional[str] = None,
+    notification_state: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update owner/SLA/severity/resolution/notification triage metadata."""
+    current = get_alert(cur, alert_id)
+    if current is None:
+        raise LookupError(f"alert {alert_id} not visible to this session")
+    if severity is not None and severity not in ALERT_SEVERITIES:
+        raise ValueError(f"unknown alert severity {severity!r}; expected one of {ALERT_SEVERITIES}")
+    if notification_state is not None and notification_state not in NOTIFICATION_STATES:
+        raise ValueError(
+            f"unknown notification state {notification_state!r}; expected one of {NOTIFICATION_STATES}"
+        )
+    cur.execute(
+        """
+        UPDATE clinical.alert
+           SET triage_owner = COALESCE(%s, triage_owner),
+               sla_due_at = COALESCE(%s, sla_due_at),
+               severity = COALESCE(%s, severity),
+               resolution_rationale = COALESCE(%s, resolution_rationale),
+               re_review_outcome = COALESCE(%s, re_review_outcome),
+               notification_state = COALESCE(%s, notification_state),
+               triaged_at = now()
+         WHERE alert_id = %s
+        RETURNING *
+        """,
+        (
+            owner,
+            sla_due_at,
+            severity,
+            resolution_rationale,
+            re_review_outcome,
+            notification_state,
+            alert_id,
+        ),
+    )
+    # webhook-seam: emit alert.triaged / alert.notification_state_changed.
     return cur.fetchone()
 
 

@@ -172,6 +172,37 @@ def alert_flow(client, headers: Dict[str, str]) -> Dict[str, Any]:
     )
 
 
+def webhook_flow(client, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Register a webhook endpoint and enqueue a synthetic config-change event."""
+    endpoint = _assert_ok(
+        client.post(
+            "/webhooks/endpoints",
+            json={
+                "url": "https://customer.example/reclass/webhook",
+                "secret": "replace-with-a-long-shared-secret",
+                "event_types": ["config_change", "tier_crossing"],
+                "description": "Customer integration endpoint",
+            },
+            headers=headers,
+        ),
+        expected=201,
+    )
+    event = _assert_ok(
+        client.post(
+            "/webhooks/events",
+            json={
+                "event_type": "config_change",
+                "source_id": "base_v1",
+                "payload": {"config_version": "base_v1"},
+            },
+            headers=headers,
+        ),
+        expected=202,
+    )
+    deliveries = _assert_ok(client.get("/webhooks/deliveries", headers=headers))
+    return {"endpoint": endpoint, "event": event, "deliveries": deliveries}
+
+
 def run_all(client, headers: Dict[str, str]) -> Dict[str, Any]:
     """Execute every cookbook flow against a live test app."""
     return {
@@ -181,4 +212,5 @@ def run_all(client, headers: Dict[str, str]) -> Dict[str, Any]:
         "report": report_flow(client, headers),
         "reanalysis": reanalysis_flow(client, headers),
         "alert": alert_flow(client, headers),
+        "webhook": webhook_flow(client, headers),
     }

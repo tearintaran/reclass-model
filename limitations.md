@@ -52,6 +52,15 @@ scoring core is most realistic when the relevant curated evidence has already
 been supplied, and least realistic when asked to infer a full classification from
 sparse public signals.
 
+The strongest benchmark is also closer to a consistency check than a correctness
+check. `clingen_real_v1` feeds the engine the same criteria the panel applied and
+then asks whether the deterministic point-sum reproduces the same tier the panel
+reached. That tests arithmetic fidelity to the ACMG/AMP point model; it does not
+test whether the panel was biologically right. A high concordance number therefore
+says "the calculator adds up the way the experts did," not "the call is correct."
+There is no orthogonal gold standard anywhere in the pipeline — no functional
+ground truth, no penetrance data, no patient outcomes.
+
 The validation therefore bounds evidence dependence, not autonomous clinical
 competence.
 
@@ -90,6 +99,13 @@ The extended providers in `ReClass Model/evidence/criteria_ext.py` do not remove
 this limit. They map structured inputs into criteria. They do not turn raw
 biology, raw charts, raw papers, or raw pedigrees into validated evidence on their
 own.
+
+Crucially, being deterministic is not the same as being objective. Determinism
+removes arithmetic and tooling variance; it does not remove judgment. It relocates
+that judgment to the upstream step where a human decides which criteria apply and
+at what strength. Two competent reviewers who disagree about whether PM2 or
+PS3_Moderate applies will get two different, equally reproducible answers. The
+subjectivity of variant interpretation is moved, not eliminated.
 
 ## 3. Evidence Completeness Is A Hard Realism Limit
 
@@ -135,10 +151,20 @@ The four serious discordances in `clingen_real_v1` are evidence of that ceiling:
 even with expert-applied criteria already supplied, a general point model does not
 perfectly reproduce panel decisions.
 
-Encoding VCEP, gene, or disease overrides can reduce this mismatch for a defined
-scope, but it does not remove the limit. Disease-specific interpretation is a
-moving expert-curation activity, not something the general point model can infer
-from coordinates alone.
+A related and permanent consequence is that the model is, and will remain, mostly
+generically calibrated. ACMG/AMP criteria are known to require gene- and
+disease-specific tuning, which is why ClinGen publishes VCEP-specific
+specifications (CSpecs). ReClass encodes that specificity for only a handful of
+cases — for example Hearing Loss proband-count PS4 for `COCH`, `KCNQ4`, and `MYO6`,
+and a denominator-aware Cardiomyopathy odds-ratio path — and applies a conservative
+generic fallback everywhere else. Encoding more VCEP, gene, or disease overrides
+can reduce the mismatch for a defined scope, but it does not remove the limit.
+Comprehensive per-gene calibration is a perpetually moving expert-curation effort
+across hundreds of gene–disease pairs whose specifications are revised over time;
+it is not something the general point model can infer from coordinates alone, and
+it cannot be "finished" the way a software feature can. For the overwhelming
+majority of genes, any deployment is applying generic thresholds to genes that have
+their own published specifications.
 
 ## 6. Reference Concordance Is Not Biological Truth
 
@@ -191,6 +217,18 @@ including:
 Some of these have structured-input providers in the folder. That means the
 system can score a reviewed signal if one is supplied. It does not mean the model
 autonomously understands every biological context behind that signal.
+
+The realistic end-to-end scope is also narrower than the breadth of provider
+machinery suggests. Identity and normalization are built for small, single-locus
+variants on a single genome build: GRCh38 only, with no liftover guarantee and no
+GRCh37 path. Reference-free canonicalization works for SNV/MNV, but reference-backed
+left-alignment of indels depends on a multi-gigabyte GRCh38 FASTA that is not part
+of the system and must be supplied and checksum-pinned per deployment. The
+copy-number, structural, repeat-expansion, mitochondrial, and non-coding providers
+only map categories that arrive pre-determined; they do not call variants or measure
+dosage, heteroplasmy, or repeat counts. So for everything beyond small coding
+variants, ReClass is a scorer of someone else's structured findings, not an analyzer
+of the underlying biology.
 
 ## 9. Automated Source Signals Are Narrow Proxies
 
@@ -259,6 +297,14 @@ when evidence changes, source snapshots change, VCEP guidance changes, or a
 versioned configuration changes. Reanalysis detects and records that movement; it
 does not eliminate it.
 
+Nor does reproducibility imply correctness. The reconstruction hash guarantees that
+a result can be re-derived byte-for-byte from the same inputs and versions; it
+guarantees nothing about whether those inputs were right. Incorrect or incomplete
+supplied criteria produce a wrong tier that is, nonetheless, perfectly reproducible
+and fully attributable. The honest framing is "garbage in, reproducible garbage
+out": the system can prove how it reached a classification, never that the
+classification reflects the patient's biology.
+
 The output is a reproducible snapshot of an evidence interpretation, not a
 timeless property of the variant.
 
@@ -272,16 +318,24 @@ That is a strength for auditability and reconstruction. It is also a limit:
 biological novelty, guideline change, and source reinterpretation enter only
 through reviewed evidence and reviewed configuration.
 
-## 14. Local Workflow Surfaces Do Not Expand The Model Boundary
+## 14. Workflow And Enterprise Surfaces Do Not Expand The Model Boundary
 
-The folder contains API routes, storage, reporting, audit logging, authentication
-surfaces, reviewer UI, reanalysis queues, FHIR serialization, and deployment
-artifacts. These are workflow and governance infrastructure around the model.
+The folder now contains a full scalable-product layer around the scoring core: API
+routes, storage with row-level isolation, reviewer and evidence-workbench UIs,
+evidence-coverage and curation queues, bulk variant/evidence import, structured
+release-gate sign-off and exportable validation packets, continuous reanalysis with
+alert triage and amended-report tracking, OIDC authentication, rate limiting, audit
+retention, outbound webhooks, tenant administration, FHIR serialization, a generated
+API client, and deployment artifacts. This is workflow, governance, and enterprise
+infrastructure around the model.
 
-They do not change what the model can infer. A polished service surface can make
-classification review more traceable, but it cannot turn sparse evidence into
-complete evidence, turn concordance into truth, or turn decision support into
-clinical authority.
+None of it changes what the model can infer. Building this layer did not alter the
+scoring math in `engine/`, and it does not remove the clinical, regulatory,
+data-licensing, or credentialed-sign-off gates. A polished, governable, multi-tenant
+service surface can make classification review more traceable and operable at scale,
+but it cannot turn sparse evidence into complete evidence, turn concordance into
+truth, or turn decision support into clinical authority. The model boundary is set
+by the evidence and the point framework, not by the surrounding software.
 
 ## Bottom Line
 

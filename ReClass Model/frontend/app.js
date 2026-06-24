@@ -791,6 +791,329 @@ async function listAlerts() {
 }
 
 // --------------------------------------------------------------------------- //
+// Worklist (case queue) — the primary daily surface                           //
+// --------------------------------------------------------------------------- //
+// Allowed status transitions, mirroring worklist.case.ALLOWED_TRANSITIONS so the
+// UI only offers legal next states. The API remains the source of truth and
+// re-validates every transition.
+const WL_TRANSITIONS = {
+  draft: ["in_review", "on_hold", "cancelled"],
+  in_review: ["signed", "draft", "on_hold", "cancelled"],
+  signed: ["released", "in_review", "on_hold"],
+  released: ["in_review"],
+  on_hold: ["draft", "in_review", "cancelled"],
+  cancelled: [],
+};
+
+const WL_STATUS_LABEL = {
+  draft: "Draft", in_review: "In review", signed: "Signed",
+  released: "Released", on_hold: "On hold", cancelled: "Cancelled",
+};
+
+function caseStatusChip(status) {
+  return el("span", { class: `wl-chip status-${status}`, text: WL_STATUS_LABEL[status] || status });
+}
+
+function slaChip(sla) {
+  const label = {
+    overdue: "Overdue", due_soon: "Due soon", on_track: "On track",
+    none: "—", released: "Released", cancelled: "Cancelled",
+  };
+  return el("span", { class: `wl-chip sla-${sla}`, text: label[sla] || sla });
+}
+
+function priorityChip(priority) {
+  return el("span", { class: `wl-chip prio-${priority}`, text: String(priority || "").toUpperCase() });
+}
+
+/** Render the queue summary chip row. Pure: given metrics, writes into `node`. */
+function renderWorklistMetrics(node, m) {
+  beginRegion(node);
+  if (!m) { setRegionEmpty(node, "No queue metrics."); return; }
+  [["Total", m.total], ["Open", m.open], ["Unassigned", m.unassigned],
+   ["Due soon", m.due_soon], ["Overdue", m.overdue]].forEach(([label, value]) => {
+    const v = value == null ? 0 : value;
+    node.appendChild(el("span", { class: "wl-metric" + (label === "Overdue" && v ? " alert" : "") }, [
+      el("span", { class: "wl-metric-value", text: String(v) }),
+      el("span", { class: "wl-metric-label", text: label }),
+    ]));
+  });
+}
+
+// Cases selected for a bulk action, keyed by case_id. Module-level so the
+// selection survives bulk-bar re-renders within a single queue render.
+const wlSelected = new Set();
+
+/** Legal next-states common to *every* selected case — the only transitions a
+ *  bulk action can offer (the API still re-validates each case independently and
+ *  reports partial results). Pure. */
+function wlCommonTransitions(cases, selectedIds) {
+  const byId = {};
+  (cases || []).forEach((c) => { byId[c.case_id] = c; });
+  let common = null;
+  selectedIds.forEach((id) => {
+    const c = byId[id];
+    if (!c) return; // a selected id not on the current page contributes nothing
+    const allowed = WL_TRANSITIONS[c.status] || [];
+    common = common === null ? allowed.slice() : common.filter((s) => allowed.includes(s));
+  });
+  return common || [];
+}
+
+/** Render the case queue table. Pure: given cases, writes into `node`; clicking a
+ *  row invokes `onSelect(case_id)`. A leading checkbox column drives multi-select
+ *  for the bulk-action bar (toggling a checkbox never triggers the row select). */
+function renderWorklistQueue(node, cases, onSelect) {
+  beginRegion(node);
+  if (!cases || !cases.length) {
+    setRegionEmpty(node, "No cases match the current filters.");
+    updateBulkBar(cases || []);
+    return;
+  }
+  // Drop any selection that is no longer on the current page so the bulk bar and
+  // "select all" stay consistent with what is shown.
+  const present = new Set(cases.map((c) => c.case_id));
+  Array.from(wlSelected).forEach((id) => { if (!present.has(id)) wlSelected.delete(id); });
+
+  const selectAll = el("input", { type: "checkbox", "aria-label": "Select all cases" });
+  selectAll.checked = cases.length > 0 && cases.every((c) => wlSelected.has(c.case_id));
+  selectAll.onchange = () => {
+    if (selectAll.checked) cases.forEach((c) => wlSelected.add(c.case_id));
+    else cases.forEach((c) => wlSelected.delete(c.case_id));
+    renderWorklistQueue(node, cases, onSelect);
+  };
+
+  const tbody = el("tbody");
+  cases.forEach((c) => {
+    const cb = el("input", { type: "checkbox", "aria-label": `Select ${c.accession}` });
+    cb.checked = wlSelected.has(c.case_id);
+    cb.onclick = (e) => e.stopPropagation();
+    cb.onchange = () => {
+      if (cb.checked) wlSelected.add(c.case_id); else wlSelected.delete(c.case_id);
+      selectAll.checked = cases.every((x) => wlSelected.has(x.case_id));
+      updateBulkBar(cases);
+    };
+    const selectTd = el("td", { class: "wl-select" }, [cb]);
+    selectTd.onclick = (e) => e.stopPropagation();
+    const tr = el("tr", { class: "wl-row" }, [
+      selectTd,
+      el("td", { text: dash(c.accession) }),
+      el("td", {}, [caseStatusChip(c.status)]),
+      el("td", {}, [priorityChip(c.priority)]),
+      el("td", { text: dash(c.assigned_to) }),
+      el("td", {}, [slaChip(c.sla_status)]),
+      el("td", { text: dash(c.due_at ? String(c.due_at).slice(0, 10) : null) }),
+      el("td", { text: String(c.variant_count == null ? 0 : c.variant_count) }),
+    ]);
+    if (onSelect) tr.onclick = () => onSelect(c.case_id);
+    tbody.appendChild(tr);
+  });
+  const table = el("table", {}, [
+    el("thead", {}, [el("tr", {}, [
+      el("th", { class: "wl-select" }, [selectAll]),
+      el("th", { text: "Accession" }), el("th", { text: "Status" }),
+      el("th", { text: "Priority" }), el("th", { text: "Assignee" }),
+      el("th", { text: "SLA" }), el("th", { text: "Due" }), el("th", { text: "Variants" }),
+    ])]),
+    tbody,
+  ]);
+  node.appendChild(el("div", { class: "wl-queue-table" }, [table]));
+  updateBulkBar(cases);
+}
+
+/** Render the bulk-action bar for the current selection. Pure given `cases` +
+ *  `wlSelected`: shows the selected count, an assign/unassign control, and the
+ *  transition buttons common to every selected case. */
+function renderBulkBar(node, cases) {
+  if (!node) return;
+  clear(node);
+  const ids = Array.from(wlSelected);
+  if (!ids.length) {
+    node.classList.remove("active");
+    node.appendChild(el("span", { class: "hint", text: "Select cases to enable bulk actions." }));
+    return;
+  }
+  node.classList.add("active");
+  node.appendChild(el("span", { class: "wl-bulk-count", text: `${ids.length} selected` }));
+
+  const assignee = el("input", { id: "wl-bulk-assignee", placeholder: "assign to (user)" });
+  const assignBtn = el("button", { text: "Assign" });
+  assignBtn.onclick = () => bulkAssign(assignee.value.trim() || null);
+  const unassignBtn = el("button", { class: "secondary", text: "Unassign" });
+  unassignBtn.onclick = () => bulkAssign(null);
+  node.appendChild(el("span", { class: "wl-bulk-group" }, [assignee, assignBtn, unassignBtn]));
+
+  const moves = wlCommonTransitions(cases, ids);
+  const moveGroup = el("span", { class: "wl-bulk-group" }, [
+    el("span", { class: "wl-actions-label", text: "Move to:" }),
+  ]);
+  if (moves.length) {
+    moves.forEach((to) => {
+      const btn = el("button", { text: `→ ${WL_STATUS_LABEL[to] || to}` });
+      btn.onclick = () => bulkTransition(to);
+      moveGroup.appendChild(btn);
+    });
+  } else {
+    moveGroup.appendChild(el("span", { class: "hint", text: "no transition applies to all selected" }));
+  }
+  node.appendChild(moveGroup);
+}
+
+/** Refresh the bulk bar element in the DOM (if present) for the given cases. */
+function updateBulkBar(cases) {
+  const bar = $("wl-bulkbar");
+  if (bar) renderBulkBar(bar, cases || []);
+}
+
+/** Write the outcome of a bulk action to the bulk status line. */
+function reportBulk(result, verb) {
+  const node = $("wl-bulk-status");
+  if (!node) return;
+  const s = (result && result.summary) || { succeeded: 0, failed: 0 };
+  const plural = s.succeeded === 1 ? "" : "s";
+  node.textContent = `${verb} ${s.succeeded} case${plural}` + (s.failed ? ` — ${s.failed} failed` : "") + ".";
+  node.className = "status " + (s.failed ? "err" : "ok");
+}
+
+/** Bulk-assign (or, with `assignedTo === null`, unassign) the selected cases. */
+async function bulkAssign(assignedTo) {
+  const ids = Array.from(wlSelected);
+  if (!ids.length) return null;
+  try {
+    const result = await api("/worklist/cases/bulk/assign", {
+      method: "POST", body: JSON.stringify({ case_ids: ids, assigned_to: assignedTo }),
+    });
+    reportBulk(result, assignedTo === null ? "Unassigned" : "Assigned");
+    wlSelected.clear();
+    await loadWorklist();
+    return result;
+  } catch (e) {
+    const node = $("wl-bulk-status");
+    if (node) { node.textContent = e && e.message ? e.message : String(e); node.className = "status err"; }
+    return null;
+  }
+}
+
+/** Bulk-transition the selected cases to `toStatus` (each validated server-side). */
+async function bulkTransition(toStatus) {
+  const ids = Array.from(wlSelected);
+  if (!ids.length) return null;
+  try {
+    const result = await api("/worklist/cases/bulk/transition", {
+      method: "POST", body: JSON.stringify({ case_ids: ids, to_status: toStatus }),
+    });
+    reportBulk(result, `Moved to ${WL_STATUS_LABEL[toStatus] || toStatus}:`);
+    wlSelected.clear();
+    await loadWorklist();
+    return result;
+  } catch (e) {
+    const node = $("wl-bulk-status");
+    if (node) { node.textContent = e && e.message ? e.message : String(e); node.className = "status err"; }
+    return null;
+  }
+}
+
+/** Build the query string from the filter controls (omits empty filters). */
+function worklistQuery() {
+  const params = new URLSearchParams();
+  const status = $("wl-status") && $("wl-status").value;
+  const priority = $("wl-priority") && $("wl-priority").value;
+  const unassigned = $("wl-unassigned") && $("wl-unassigned").checked;
+  const search = $("wl-search") && $("wl-search").value.trim();
+  if (status) params.set("status", status);
+  if (priority) params.set("priority", priority);
+  if (unassigned) params.set("unassigned", "true");
+  if (search) params.set("q", search);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+async function loadWorklist() {
+  const metrics = await api("/worklist/metrics");
+  renderWorklistMetrics($("wl-metrics"), metrics);
+  const cases = await api(`/worklist/cases${worklistQuery()}`);
+  renderWorklistQueue($("wl-queue"), cases, (id) =>
+    runAction($("wl-detail"), () => selectCase(id), { loadingLabel: "Loading case…" }));
+}
+
+async function createCase() {
+  const statusEl = $("wl-create-status");
+  const body = {
+    accession: $("wl-accession").value.trim(),
+    priority: $("wl-new-priority").value,
+    ordering_provider: $("wl-provider").value.trim() || null,
+    test_code: $("wl-test-code").value.trim() || null,
+    patient_mrn: $("wl-mrn").value.trim() || null,
+  };
+  if (!body.accession) {
+    if (statusEl) { statusEl.textContent = "Accession is required."; statusEl.className = "status err"; }
+    return;
+  }
+  try {
+    const created = await api("/worklist/cases", { method: "POST", body: JSON.stringify(body) });
+    if (statusEl) { statusEl.textContent = `Created case ${created.accession}.`; statusEl.className = "status ok"; }
+    ["wl-accession", "wl-provider", "wl-test-code", "wl-mrn"].forEach((id) => { if ($(id)) $(id).value = ""; });
+    await loadWorklist();
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = e && e.message ? e.message : String(e); statusEl.className = "status err"; }
+  }
+}
+
+async function selectCase(caseId) {
+  const c = await api(`/worklist/cases/${encodeURIComponent(caseId)}`);
+  renderCaseDetail($("wl-detail"), c);
+}
+
+/** Render the selected case: header, metadata, assignment, and the legal
+ *  transition buttons for its current status. */
+function renderCaseDetail(node, c) {
+  beginRegion(node);
+  if (!c) { setRegionEmpty(node, "Select a case from the queue."); return; }
+  node.appendChild(el("div", { class: "wl-detail-head" }, [
+    el("strong", { text: dash(c.accession) }),
+    caseStatusChip(c.status), priorityChip(c.priority), slaChip(c.sla_status),
+  ]));
+  const meta = el("dl", { class: "wl-detail-meta" });
+  [["Assignee", c.assigned_to], ["Ordering provider", c.ordering_provider],
+   ["Test code", c.test_code], ["Received", c.received_at], ["Due", c.due_at],
+   ["Turnaround (h)", c.turnaround_hours], ["Variants", c.variant_count],
+   ["PHI", c.phi_redacted ? "redacted (request access)" : "shown / none"]].forEach(([k, v]) => {
+    meta.appendChild(el("dt", { text: k }));
+    meta.appendChild(el("dd", { text: dash(v == null ? null : String(v)) }));
+  });
+  node.appendChild(meta);
+
+  const assignInput = el("input", { id: "wl-assign-input", placeholder: "assign to (user)", value: c.assigned_to || "" });
+  const assignBtn = el("button", { text: "Assign" });
+  assignBtn.onclick = () => runAction(node, async () => {
+    await api(`/worklist/cases/${encodeURIComponent(c.case_id)}`, {
+      method: "PATCH", body: JSON.stringify({ assigned_to: assignInput.value.trim() || null }),
+    });
+    await selectCase(c.case_id);
+    await loadWorklist();
+  });
+  node.appendChild(el("div", { class: "wl-assign" }, [assignInput, assignBtn]));
+
+  node.appendChild(el("div", { class: "wl-actions-label", text: "Move to:" }));
+  const actions = el("div", { class: "wl-transitions" });
+  (WL_TRANSITIONS[c.status] || []).forEach((to) => {
+    const btn = el("button", { text: `→ ${WL_STATUS_LABEL[to] || to}` });
+    btn.onclick = () => runAction(node, async () => {
+      await api(`/worklist/cases/${encodeURIComponent(c.case_id)}/transition`, {
+        method: "POST", body: JSON.stringify({ to_status: to }),
+      });
+      await selectCase(c.case_id);
+      await loadWorklist();
+    });
+    actions.appendChild(btn);
+  });
+  if (!actions.childNodes.length) {
+    actions.appendChild(el("span", { class: "hint", text: "No further transitions." }));
+  }
+  node.appendChild(actions);
+}
+
+// --------------------------------------------------------------------------- //
 // Wiring                                                                       //
 // --------------------------------------------------------------------------- //
 function bindTabs() {
@@ -815,6 +1138,8 @@ function bindActions() {
   $("btn-signoff").onclick = () => runAction($("signoff-release"), signOff, { loadingLabel: "Signing off…" });
   $("btn-list-drafts").onclick = () => runAction($("draft-region"), listDrafts, { loadingLabel: "Loading drafts…" });
   $("btn-list-alerts").onclick = () => runAction($("alert-region"), listAlerts, { loadingLabel: "Loading alerts…" });
+  if ($("btn-wl-refresh")) $("btn-wl-refresh").onclick = () => runAction($("wl-queue"), loadWorklist, { loadingLabel: "Loading queue…" });
+  if ($("btn-wl-create")) $("btn-wl-create").onclick = createCase;
 }
 
 function init() {
@@ -833,6 +1158,10 @@ function init() {
   setRegionEmpty($("signoff-release"), "No classification selected yet.");
   setRegionEmpty($("draft-region"), "Refresh to list draft classifications.");
   setRegionEmpty($("alert-region"), "Refresh to list tier-crossing alerts.");
+  setRegionEmpty($("wl-metrics"), "Refresh the queue to load metrics.");
+  setRegionEmpty($("wl-queue"), "Refresh to load the case queue.");
+  setRegionEmpty($("wl-detail"), "Select a case from the queue.");
+  updateBulkBar([]);
 }
 
 // --------------------------------------------------------------------------- //
@@ -859,6 +1188,13 @@ if (typeof window !== "undefined") {
     // handlers
     resolveEvidence, classifyPreview, persistDraft, loadReviewerReport, loadSummary,
     signOff, listDrafts, listAlerts,
+    // worklist
+    loadWorklist, createCase, selectCase, worklistQuery, renderWorklistMetrics,
+    renderWorklistQueue, renderCaseDetail, caseStatusChip, slaChip, priorityChip,
+    WL_TRANSITIONS, WL_STATUS_LABEL,
+    // worklist bulk actions
+    wlSelected, wlCommonTransitions, renderBulkBar, updateBulkBar,
+    bulkAssign, bulkTransition, reportBulk,
     // dom helpers (handy for tests)
     el, clear, $,
   };

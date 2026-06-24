@@ -157,6 +157,135 @@ class AlertStateRequest(BaseModel):
     state: str
 
 
+class AlertTriageRequest(BaseModel):
+    owner: Optional[str] = None
+    sla_due_at: Optional[str] = None
+    severity: Optional[str] = None
+    resolution_rationale: Optional[str] = None
+    re_review_outcome: Optional[str] = None
+    notification_state: Optional[str] = None
+
+
+class ReleaseGateRequest(BaseModel):
+    classification: Optional[Dict[str, Any]] = None
+    signoff_packet: Dict[str, Any] = Field(default_factory=dict)
+    current_state: str = "review_pending"
+    target_scope: Dict[str, Any] = Field(default_factory=dict)
+    active_config_hash: Optional[str] = None
+    preflight_failures: List[Dict[str, Any]] = Field(default_factory=list)
+    serious_discordances: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ReleaseApprovalRequest(BaseModel):
+    signoff_packet: Dict[str, Any] = Field(default_factory=dict)
+    target_scope: Dict[str, Any] = Field(default_factory=dict)
+    serious_discordances: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ReleaseStateRequest(BaseModel):
+    state: str
+    release_notes: Optional[str] = None
+
+
+class ReleasePacketRequest(BaseModel):
+    release_scope: Dict[str, Any] = Field(default_factory=dict)
+    config_hash: Optional[str] = None
+    source_snapshots: Dict[str, Any] = Field(default_factory=dict)
+    benchmark_metrics: List[Dict[str, Any]] = Field(default_factory=list)
+    serious_discordances: List[Dict[str, Any]] = Field(default_factory=list)
+    sign_off_ledger: List[Dict[str, Any]] = Field(default_factory=list)
+    validation_report_id: Optional[str] = None
+
+
+class ReanalysisPolicyRequest(BaseModel):
+    cadence: str = "monthly"
+    included_sources: List[str] = Field(default_factory=lambda: ["clinvar", "clingen", "gnomad", "revel"])
+    affected_scope: Dict[str, Any] = Field(default_factory=dict)
+    escalation_thresholds: Dict[str, Any] = Field(default_factory=dict)
+    retention: Dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class CaseCreateRequest(BaseModel):
+    """Open a new worklist case (one ordered specimen under review)."""
+
+    accession: str = Field(min_length=1)
+    priority: str = "routine"
+    assigned_to: Optional[str] = None
+    specimen_id: Optional[str] = None
+    specimen_type: Optional[str] = None
+    ordering_provider: Optional[str] = None
+    ordering_facility: Optional[str] = None
+    test_code: Optional[str] = None
+    # PHI context (access-controlled; redacted from de-identified views).
+    patient_mrn: Optional[str] = None
+    patient_name: Optional[str] = None
+    indication: Optional[str] = None
+    received_at: Optional[str] = None
+    due_at: Optional[str] = None
+    notes: Optional[str] = None
+    classification_ids: List[str] = Field(default_factory=list)
+
+
+class CaseUpdateRequest(BaseModel):
+    """Patch a case's operational fields. Omitted fields are left unchanged;
+    an explicit ``null`` for ``assigned_to`` unassigns the case."""
+
+    assigned_to: Optional[str] = None
+    priority: Optional[str] = None
+    due_at: Optional[str] = None
+    notes: Optional[str] = None
+    # Distinguishes "omitted" from an explicit null for the nullable fields.
+    model_config = {"extra": "forbid"}
+
+
+class CaseTransitionRequest(BaseModel):
+    """Move a case to a new status in the pipeline (state-machine validated)."""
+
+    to_status: str = Field(min_length=1)
+    note: Optional[str] = None
+
+
+class CaseAttachRequest(BaseModel):
+    """Link a persisted classification receipt to a case."""
+
+    classification_id: str = Field(min_length=1)
+
+
+class CaseBulkAssignRequest(BaseModel):
+    """Assign (or, with ``assigned_to: null``, unassign) many cases at once.
+
+    ``assigned_to`` is required so the action is always explicit — send an
+    explicit ``null`` to bulk-unassign. Each case is applied independently; the
+    response reports per-case success/failure."""
+
+    case_ids: List[str] = Field(min_length=1, max_length=500)
+    assigned_to: Optional[str] = Field(...)
+    model_config = {"extra": "forbid"}
+
+
+class CaseBulkTransitionRequest(BaseModel):
+    """Move many cases to ``to_status`` at once; each is validated independently
+    against its own current status (so a mixed-status selection transitions the
+    legal cases and reports the rest)."""
+
+    case_ids: List[str] = Field(min_length=1, max_length=500)
+    to_status: str = Field(min_length=1)
+    note: Optional[str] = None
+    model_config = {"extra": "forbid"}
+
+
+class AmendedReportRequest(BaseModel):
+    previous_report_id: str
+    amendment_reason: str = Field(min_length=1)
+    report_id: Optional[str] = None
+    issued: Optional[str] = None
+    effective: Optional[str] = None
+    signer: Optional[str] = None
+    recipients: List[str] = Field(default_factory=list)
+    channel: str = "ehr"
+
+
 # --------------------------------------------------------------------------- #
 # Response shapes (kept permissive: assembled from dataclasses/dicts)         #
 # --------------------------------------------------------------------------- #

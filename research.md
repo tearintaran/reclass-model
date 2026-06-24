@@ -3,23 +3,50 @@
 *Literature adjacent to the ReClass proof of concept, and the research extension
 this project has actually accomplished.*
 
-Last literature review: 2026-06-17. This pass re-verified every code-grounded
-claim below against the current repository (`engine/scoring.py`,
-`evidence/model.py`, `storage/verify.py`, `db/schema.sql`, `reporting/fhir.py`,
-the generated validation/comparison/failure reports, and the 781-test suite) and
-**independently re-verified the external literature citation by citation**. The
-re-verification corrected several citation errors carried in the prior draft
-(notably: Genome Alert! is published in *Genetics in Medicine*, not *Genome
-Medicine*; the PP1/BS4/PP4 guidance is Biesecker et al. 2024, not
-"Jarvik/Browning"; AutoPVS1's author list; vcf2fhir is 2021, not 2020; the
-ClinGen-vs-VCI paper identity; and the single-lab vs multi-lab framing of the 2024
-reclassification-rate study) and **added** four threads the field has moved on:
-(1) the GA4GH Variation Representation Specification (VRS) as the closest standards
-analogue to the project's digest-based reconstruction receipt; (2) the
-2025-2026 wave of LLM-based ACMG classifiers, which sharpen the case for a
-*deterministic, reconstructable* engine; (3) the ClinGen SVI splicing
-recommendations the engine's splice mapper targets; and (4) the canonical FAIR
-principles anchor (Wilkinson 2016) behind the provenance framing.
+Last literature review: **2026-06-19** (prior pass 2026-06-17). This pass
+re-verified every code-grounded claim below against the current repository
+(`engine/scoring.py`, `evidence/model.py`, `storage/verify.py`, `db/schema.sql`,
+`reporting/fhir.py`, and the validation/comparison/failure reports *regenerated
+2026-06-19*) and re-checked the headline numbers (`synthetic_v1` 92.9% / 0 serious;
+`clingen_real_v1` 94.7% / 4 serious; `clinvar_real_v1` 5.0% / 34 serious;
+`clinvar_enriched_v1` 42.4% / 6 serious; the 5.0%→42.4% enrichment lift and its
+confusion-matrix deltas; the named GJB2/SLC26A4/HNF4A and BRCA1 serious-error
+cases), all of which **still hold** after the 2026-06-19 report regeneration. The
+2026-06-17 pass had already corrected several inherited citation errors (Genome
+Alert! is *Genetics in Medicine*, not *Genome Medicine*; the PP1/BS4/PP4 guidance is
+Biesecker et al. 2024; AutoPVS1's author list; vcf2fhir is 2021; the ClinGen-vs-VCI
+paper identity; single-lab vs multi-lab framing of the 2024 reclassification study).
+
+The **2026-06-19 pass adds five mid-2026 developments** the field has moved on, each
+verified against primary sources:
+
+1. **The successor to the 2015 guideline now has a name, a method, and a pilot.** The
+   long-anticipated revision is now the joint **ACMG/AMP/CAP/ClinGen "SVC v4.0"**
+   standard — explicitly a **Bayesian, points-based** system with VUS subdivision and
+   evidence-code overhaul, in final piloting (Biesecker et al., ACMG 2026 abstract
+   P593) but **still unpublished** as of mid-2026. This is the single most important
+   update because the field's *official* next standard is converging on the exact
+   Tavtigian points model ReClass already implements (see §2.1, §6).
+2. **GA4GH VRS 2.0 is formally released** (2.0.0/2.0.1, March 2024; 2.1 snapshots
+   Feb 2026), with structural-variation support, compact ambiguous representation,
+   metadata integration, and extensibility — sharpening the digest-identity parallel
+   (§2.5, ref 41).
+3. **gnomAD local-ancestry-inference** (Kore et al., *Nat Commun* 2025) shows that
+   ancestry-aggregated frequencies mask ≥2-fold differences for the majority of
+   variants in admixed groups — direct empirical support for open question 7 (§2.2,
+   ref 14b).
+4. **The 2025-2026 LLM-classifier picture is now more nuanced**: recent models show
+   *high self-consistency* (>90% same answer on repeat) yet still hallucinate and
+   misclassify pathogenicity, and "precision grounding" in evidence databases is the
+   emerging mitigation — which refines, rather than overturns, the case for a
+   *reconstructable* engine (§2.3, ref 25).
+5. The HL7 **FHIR Genomics Reporting IG v4.0.0** is now in active continuous build
+   (2026-01-30); v3.0.0 (STU3) remains the current *published* version the serializer
+   targets (§2.5, ref 42).
+
+The three earlier-added threads remain: the ClinGen SVI splicing recommendations the
+engine's splice mapper targets, and the canonical FAIR principles anchor (Wilkinson
+2016) behind the provenance framing.
 
 This review positions the **Standardized Variant Reclassification Engine**
 (`ReClass Model/`) against published ACMG/AMP variant-interpretation literature,
@@ -95,20 +122,45 @@ model rather than inventing a new one (`engine/config.py`,
 `engine/configs/base_v1.json`).
 
 **Freshness check (mid-2026).** There is still **no published replacement** for the
-Richards et al. 2015 guideline. The long-anticipated ACMG/AMP revision (co-chaired
-by Leslie Biesecker and Steven Harrison, intended to resolve criterion ambiguities,
-re-evaluate criterion strengths, and build a mechanism for ongoing gene-specific
-addenda) remains an **in-development document** [7] — not a published guideline and
-not a posted full preprint as of June 2026. It should not be cited as a 2023/2024/2025
-published standard. The active frontier is three-pronged: (1) the endorsed
-Tavtigian/ClinGen-SVI point system, increasingly the default combining method and
-now reused outside germline work — the ClinGen/CGC/VICC somatic *oncogenicity*
-standard [4] adopts the same +1/+2/+4/+8 point shorthand; (2) gene/disease-specific
-VCEP criteria specifications (CSpecs); and (3) ongoing computational-predictor
-calibration. The current citable surface for the combining rules is the ClinGen
-Variant Classification Guidance page (last updated July 2025) [5], which now
-aggregates and supersedes the standalone SVI recommendation pages; the SVI Working
-Group page itself was **retired in April 2025** [6].
+Richards et al. 2015 guideline — but the replacement is now concretely named and in
+final piloting. The long-anticipated revision has become the joint
+**ACMG/AMP/CAP/ClinGen Sequence Variant Classification standard, "SVC v4.0"**
+(co-chaired by Leslie Biesecker and Steven Harrison), and its design is now public
+through a March 2026 ACMG-meeting pilot report (Biesecker et al., abstract P593 [7]):
+it is explicitly a **Bayesian, points-based system with flow diagrams** that walk a
+curator through evidence application, it **subdivides the VUS tier by likelihood of
+pathogenicity** onto a graded scale, and it carries a **complete overhaul of the
+evidence-code labels** to be more concept-driven. The validity/usability pilot
+reported **85% (17/20) of test variants reaching >90% concordance** on the
+three-level scale, and is expanding to 30 variants and >100 community curators before
+release. Crucially, SVC v4.0 **is not yet a published guideline** as of June 2026 —
+ACMG's "Documents in Development" list still carries it as forthcoming ("will soon be
+released") [7] — so it must not be cited as a published standard. The active citable
+frontier remains: (1) the endorsed Tavtigian/ClinGen-SVI point system, increasingly
+the default combining method and now reused outside germline work — the
+ClinGen/CGC/VICC somatic *oncogenicity* standard [4] adopts the same +1/+2/+4/+8
+point shorthand, and SVC v4.0 makes the same Bayesian points model the *official*
+germline standard; (2) gene/disease-specific VCEP criteria specifications (CSpecs);
+and (3) ongoing computational-predictor calibration. The current citable surface for
+the combining rules is the ClinGen Variant Classification Guidance page (last updated
+July 2025) [5], which now aggregates and supersedes the standalone SVI recommendation
+pages; the SVI Working Group page itself was **retired in April 2025** [6].
+
+**Why SVC v4.0 matters for ReClass (and is favorable to it).** Two of SVC v4.0's
+headline changes are properties ReClass already has, which moves the project *with*
+the standard rather than against it. First, the new official standard adopts the
+Bayesian points model ReClass implements (`engine/config.py`,
+`engine/configs/base_v1.json`) — vindicating the choice to score on Tavtigian points
+rather than the qualitative 2015 combining rules. Second, the evidence-code overhaul
+is exactly the kind of change ReClass's architecture is built to absorb: because the
+governed *point core* is separated from the reviewable evidence-code → point mappings
+in versioned config, a future re-label of criteria can be applied as a new config
+version with a new engine fingerprint, leaving every historical receipt
+reconstructable under its recorded version. The one genuinely new demand SVC v4.0
+places on the project is its graded VUS sub-tier: ReClass currently collapses
+insufficient-evidence cases to a single VUS (its dominant failure mode on sparse
+data, §4.2), whereas SVC v4.0 will expect a likelihood-graded VUS — a concrete,
+bounded extension target rather than a redesign (see open question 10).
 
 The VCEP track is moving fastest and is directly relevant to ReClass's override
 mechanism. Recent examples include the ClinGen RASopathy VCEP update (Wilcox et al.,
@@ -160,9 +212,17 @@ reporting and flags for discordant exome/genome frequencies, underscoring why
 frequency evidence needs source/version provenance and cannot be treated as
 timeless — which is why ReClass records `joint.faf95.popmax` provenance and treats
 database absence as *unknown*, not as allele-frequency zero. (gnomAD v5 is
-anticipated but not released as of mid-2026; v4.1 remains the current reference.)
-ClinVar and the ClinGen Evidence Repository [15] are the assertion sources the
-benchmarks draw on.
+anticipated but **still not released as of mid-2026**; v4.1 remains the current
+reference.) A 2025 advance sharpens the equity caveat directly: Kore, Wilson, Tiao
+et al. applied **local ancestry inference** to >27M variants in gnomAD's admixed
+Admixed-American and African/African-American groups and found that **78.5% and 85.1%
+of variants, respectively, show ≥2-fold differences in ancestry-specific
+frequencies** that the standard aggregated estimate masks — frequencies granular
+enough to flip some BA1/BS1/PM2 calls (the authors note it can reclassify VUS toward
+benign) [14b]. This is direct empirical evidence for why ReClass treats frequency
+evidence as a versioned, provenance-bearing signal rather than a single timeless
+number, and motivates open question 7. ClinVar and the ClinGen Evidence Repository
+[15] are the assertion sources the benchmarks draw on.
 
 **Implication for ReClass.** ReClass's evidence coverage is broader than the first
 public-source slice (it adds AlphaMissense, conservation, gene-constraint context,
@@ -186,7 +246,7 @@ Several tools already automate parts of ACMG/AMP interpretation:
 | VarSome, Franklin, ELLA | Commercial/freemium or hosted platforms [22] | Clinically used; per-rule transparency, but not always independently reproducible or fully auditable from source. |
 | OpenCRAVAT calibrated package | 2025 package built around ClinGen PP3/BP4 calibration [23] | Adjacent evidence-calibration infrastructure rather than a complete receipt system. |
 | AutoPM3 | Li et al. 2025 [24] | LLM-driven extraction of PM3 (in-trans) evidence from the literature; a modular, criterion-specific assist. |
-| LLM ACMG classifiers | DeepSeek/GPT-4-based frameworks 2025 [25] | Emerging *non-deterministic* paradigm; the explicit contrast ReClass's reconstructable design is built against. |
+| LLM ACMG classifiers | DeepSeek/GPT-4o/Llama/Qwen frameworks 2025-2026 [25] | Emerging paradigm: often self-consistent yet still hallucinates/misclassifies and emits no replayable receipt — the explicit contrast ReClass's *reconstructable* design is built against. |
 
 Two recent comparative studies frame this crowded field:
 
@@ -208,13 +268,27 @@ Two recent comparative studies frame this crowded field:
 
 **Implication for ReClass.** The adjacent literature is crowded on automated
 criteria assignment and tool benchmarking, and the 2025-2026 frontier is adding
-LLM-based assistants that are powerful but *non-deterministic* (documented GPT-4
-drift in variant assessment [25]). ReClass should not claim to be the first
-automated classifier. Its stronger distinction is that it treats every
-classification as a reconstructable, versioned, provenance-carrying receipt and
-uses *matched* validation fixtures to isolate evidence completeness from scoring
-logic — the exact auditability gap Costa et al. [27] call out, and the exact
-property LLM classifiers cannot guarantee.
+LLM-based assistants. The accurate framing for these is more nuanced than "they
+drift": recent benchmarks of GPT-4o/Llama-3.1/Qwen-2.5 for variant classification
+report *high self-consistency* (the majority of repeated queries return the same
+answer >90% of the time) yet persistent **hallucination and outright pathogenicity
+misclassification** — GPT-4o led at ~0.73 accuracy, a three-model consensus reached
+~0.97 but only on the 26% of variants where all three already agreed, and O1 / Claude
+3.5 Sonnet / DeepSeek-R1 each occasionally mis-call pathogenicity [25]. The emerging
+mitigation is **"precision grounding"** — feeding LLMs curated evidence-database
+annotations (ClinVar, ACMG codes) eliminates much of the hallucination [25]. So the
+distinction ReClass should claim is not "deterministic vs random," but
+**reconstructable vs unreplayable**: even a self-consistent LLM cannot emit a
+version-bound receipt that a third party can re-derive byte-for-byte from the recorded
+evidence and engine identity, and its residual misclassifications cannot be audited
+to a fixed rule. ReClass should not claim to be the first automated classifier; its
+stronger distinction is that it treats every classification as a reconstructable,
+versioned, provenance-carrying receipt and uses *matched* validation fixtures to
+isolate evidence completeness from scoring logic — the exact auditability gap Costa et
+al. [27] call out. The "precision grounding" result also points at the productive
+boundary (open question 9): an LLM is best used to *extract grounded evidence events*
+that enter the receipt as signed inputs, not to be the classifier whose output is the
+receipt.
 
 ### 2.4 Variant reanalysis and reclassification literature
 
@@ -282,19 +356,26 @@ Three adjacent literatures motivate ReClass's systems choices:
 - **Standardized digest-based identity.** The GA4GH Variation Representation
   Specification (VRS; Wagner et al. 2021 [41]) defines globally consistent,
   *computed* variant identifiers via normalization plus a truncated-SHA-512 digest —
-  a direct standards parallel to ReClass's hashing discipline. The key difference is
-  the object being hashed: VRS digests a *variant*, whereas ReClass's
+  a direct standards parallel to ReClass's hashing discipline. **VRS 2.0 is now a
+  formally released standard** (2.0.0/2.0.1, March 2024; 2.1 in development, snapshots
+  Feb 2026) and added structural-variation support, compact ambiguous-variant
+  representation, metadata integration, and extensibility [41] — broadening the class
+  of variants that can carry a computed identity. The key difference from ReClass
+  remains the object being hashed: VRS digests a *variant*, whereas ReClass's
   `reconstruction_hash` digests a *classification* (canonical evidence + engine/config
   version). ReClass effectively extends digest-based identity from the variant to the
-  whole interpretation receipt.
+  whole interpretation receipt, and a mature VRS 2.0 makes the federated-identity
+  pairing in open question 8 (carry a VRS allele id alongside the receipt) more
+  concretely actionable.
 - **Clinical-data interoperability.** The HL7 FHIR Genomics Reporting
-  Implementation Guide [42] (now v3.0.0 / STU3, published 2024-12-12) standardizes
-  how variants, annotations, and interpretations are exchanged with EHR/LIS systems
-  (with tooling such as vcf2fhir [43] bridging VCF to FHIR). ReClass's deterministic
-  FHIR Genomics serializer (`reporting/fhir.py`) targets this standard and derives
-  every resource id from the variant key + `reconstruction_hash`, so a reconstructable
-  classification is emitted in an interoperable, byte-stable form rather than a
-  bespoke report blob.
+  Implementation Guide [42] (current *published* version v3.0.0 / STU3, published
+  2024-12-12; **v4.0.0 now in active continuous build, snapshot 2026-01-30**, not yet
+  balloted/published) standardizes how variants, annotations, and interpretations are
+  exchanged with EHR/LIS systems (with tooling such as vcf2fhir [43] bridging VCF to
+  FHIR). ReClass's deterministic FHIR Genomics serializer (`reporting/fhir.py`)
+  targets the published v3.0.0 standard and derives every resource id from the variant
+  key + `reconstruction_hash`, so a reconstructable classification is emitted in an
+  interoperable, byte-stable form rather than a bespoke report blob.
 
 **Implication for ReClass.** ReClass's core design responds to this literature by
 making every point attributable, every source version visible, every stored
@@ -312,7 +393,7 @@ deterministic receipt.
 | Scoring framework | ACMG combining rules or Tavtigian/Bayesian points | Tavtigian 2020 points; not novel. |
 | Computational evidence | Tool-specific predictors or Pejaver/ClinGen PP3/BP4 calibration | Uses Pejaver-calibrated REVEL bins, AlphaMissense/conservation extensions, and a documented one-event REVEL+AlphaMissense consensus rule (no predictor stacking). |
 | Output artifact | Tier plus criteria/rationale | Tier, points, per-criterion contributions, overrides, provider versions, source records, warnings, engine/config version, SHA-256 reconstruction hash. |
-| Reproducibility | Usually code rerun or logs; LLM tools are non-deterministic | Explicit cryptographic reconstruction receipt over canonical evidence + engine version, plus a verifier that replays persisted evidence and detects tampering. |
+| Reproducibility | Usually code rerun or logs; LLM tools are self-consistent at best but not byte-replayable | Explicit cryptographic reconstruction receipt over canonical evidence + engine version, plus a verifier that replays persisted evidence and detects tampering. |
 | Variant identity | Coordinate strings; increasingly GA4GH VRS digests | Canonical provider/storage keys; receipt-level digest extends VRS-style digest identity from variant to classification. |
 | Benchmark framing | Headline agreement vs ClinVar/eRepo | Same engine on complete ClinGen criteria, sparse ClinVar signals, and ClinVar enriched with ClinGen matches — to separate scoring behavior from evidence availability. |
 | Evidence provenance | Often human-readable explanation | `EvidenceBundle` with provider versions, source records, warnings, match route, and stable JSON round-trip. |
@@ -386,6 +467,34 @@ Pathogenic recall from 0% to 55.9%. The transfer is not free: 1,023 cases worsen
 (mostly former VUS-by-default now overshooting), which the report quantifies
 case-by-case.
 
+**Which reclassifications the enrichment produced.** Because the fixture
+population, engine, and config are held fixed, every changed call is attributable
+to the transferred ClinGen criteria alone. Relative to the unenriched baseline,
+6,807 cases *became* an exact match to the reference tier and 1,019 *lost* a
+previously exact one (net +5,788 exact, consistent with the 19.9% -> 46.6%
+headline; 6,993 cases moved closer to the reference and 1,023 moved farther). Read
+directly from the comparison report's confusion-matrix deltas (after - before), the
+corrective reclassifications are overwhelmingly movements *out of the
+VUS-by-default trap* into the reference tier:
+
+| Reference tier | Newly exact-correct (cases) | No longer mis-called VUS (cases) |
+|---|---:|---:|
+| Pathogenic | +3,042 | -3,180 |
+| Likely Pathogenic | +1,557 | -2,505 |
+| Likely Benign | +1,052 | -1,149 |
+| Benign | +1,011 | -693 |
+
+The regressions are narrow and one-directional: 874 reference-VUS cases left the
+(correct) VUS cell, of which 719 were over-called Likely Pathogenic and 15
+Pathogenic once transferred pathogenic criteria pushed an otherwise-VUS score past
+the +6 cutoff (a further 964 *Likely Pathogenic*-reference cases were over-called
+Pathogenic by one tier). That is the precise shape of the "not free" cost: the
+enrichment converts a large amount of VUS-default under-calling into correct
+definitive calls, at the price of a smaller amount of pathogenic-side over-calling.
+None of these are clinical re-issues; each is a change in the deterministic
+engine's tier between the unenriched and enriched evidence conditions, fully
+reconstructable from the recorded evidence.
+
 **Extension beyond literature.** Harrison et al. [28] showed that evidence sharing
 can resolve discordance. ReClass operationalizes that idea in a reproducible
 pipeline — same fixture population, same engine, direct-ID ClinGen enrichment plus
@@ -410,6 +519,30 @@ overrides in `engine/configs/base_v1.json`; the report's clinical-release state 
 `governance_reviewed_pending_credentialed_signoff`, and the Hearing Loss GJB2/SLC26A4
 BA1/BS1 thresholds are flagged against the current ClinGen Hearing Loss CSpec for
 correction pending credentialed clinical sign-off.
+
+**The specific reclassifications (named).** Enumerated from the two
+failure-analysis reports, the serious erroneous reclassifications the engine
+produced (reference tier -> engine tier; all references are ClinGen/expert-panel
+curated) are:
+
+| Variant (ClinVar ID) | Gene / VCEP | Reference -> Engine | Why |
+|---|---|---|---|
+| NM_004004.5(GJB2):c.35delG p.Gly12Valfs (17004) | GJB2 / Hearing Loss | Pathogenic -> Benign | BA1 stand-alone override beats PVS1+PS4+PM3 (point sum +6) |
+| NM_004004.5(GJB2):c.167delT p.Leu56Argfs (17010) | GJB2 / Hearing Loss | Pathogenic -> Benign | BA1 stand-alone override beats PVS1+PM3 (point sum +2) |
+| NM_000441.1(SLC26A4):c.349C>T (43555) | SLC26A4 / Hearing Loss | Pathogenic -> Benign | BA1 stand-alone override beats PP1+PM3+PP3+PP4 |
+| NM_175914.5(HNF4A):c.340C>T p.Arg114Trp (9212) | HNF4A / Monogenic Diabetes | Likely Pathogenic -> Likely Benign | net -3 pts: BS1+BS2 (strong) + BP5 outweigh PP1+PP3+PP4 |
+
+The first three (the BA1 *conflict* cases) recur as serious errors in the enriched
+ClinVar benchmark (`failure_analysis_clinvar_enriched_v1.md`); the HNF4A
+*strength-mismatch* case does not recur there. Three *additional* serious
+reclassifications appear only in the enriched run -- BRCA1 expert-panel Pathogenic
+variants CV-55432, CV-54758, and CV-266331 -- which the enrichment failed to match
+to any transferred ClinGen criteria, leaving the engine to fall back on REVEL BP4
+alone (REVEL 0.061-0.169) and reclassify each Pathogenic -> Likely Benign. These
+are *evidence-absence* reclassifications, categorically different from the BA1
+conflict cases, and they account for why the enriched serious-error count is 6
+(3 founder-BA1 + 3 BRCA1-evidence-absence) rather than 3. All seven are
+flagged for credentialed clinical review, not auto-corrected in code.
 
 **Extension beyond literature.** ClinGen already recognizes BA1 exceptions and
 VCEP-specific frequency thresholds. ReClass does not discover the exception as new
@@ -484,7 +617,7 @@ calls, clocks, randomness, or live source drift.
 **Project evidence.** The scoring core is pure; committed fixtures live under
 `validation/fixtures/`; generated validation reports are reproducible artifacts
 under `validation/reports/`; diagnostic plots are written under `plots/`; source
-governance is documented. The 781-test suite is green in this environment, and
+governance is documented. The 877-test suite is green in this environment, and
 storage/reanalysis tests that need PostgreSQL skip cleanly when unavailable.
 
 **Extension beyond literature.** This addresses a known reproducibility weakness in
@@ -534,9 +667,18 @@ This is a genuine research extension because it changes the question from "can a
 rule engine classify variants?" to "which missing evidence and provenance links
 prevent a deterministic engine from reproducing expert assertions, and how do we
 keep the answer reconstructable and auditable as evidence and guidance change?" In a
-field increasingly tempted by non-deterministic LLM classifiers, the demonstration
-that a *reconstructable* engine's gap is evidence rather than arithmetic is itself a
-useful negative-control result.
+field adding LLM classifiers whose outputs cannot be byte-for-byte replayed, the
+demonstration that a *reconstructable* engine's gap is evidence rather than
+arithmetic is itself a useful negative-control result.
+
+The mid-2026 emergence of the **ACMG/AMP/CAP/ClinGen SVC v4.0** standard reinforces
+this framing rather than undercutting it: the field's official next guideline is
+itself a Bayesian, points-based system that subdivides VUS by likelihood, so the
+scoring substrate ReClass chose is converging *toward*, not away from, the standard.
+That makes the project's contribution — reconstructable, provenance-bound, governed
+evidence handling around a points core — the part that remains scarce, and reframes
+the headline gap (collapse to VUS on sparse evidence) as the natural place to adopt
+SVC v4.0's graded VUS sub-tier once it publishes (open question 10).
 
 ---
 
@@ -577,7 +719,12 @@ useful negative-control result.
 
 7. **Equity and frequency evidence.** How should ancestry-specific frequency, local
    ancestry, under-sampled populations, and founder effects be represented so that
-   BA1/BS1/PM2 reasoning does not overstate certainty?
+   BA1/BS1/PM2 reasoning does not overstate certainty? (Sharpened by Kore et al. 2025
+   [14b]: local-ancestry inference reveals ≥2-fold ancestry-specific frequency
+   differences for the majority of variants in admixed gnomAD groups, so an aggregated
+   popmax FAF can both over- and under-state a frequency criterion. Could ReClass
+   carry ancestry-resolved FAF as a provenance-bearing signal, and would that have
+   prevented any of the founder-variant BA1 conflicts in §4.4?)
 
 8. **Interoperability fidelity.** Does the deterministic FHIR Genomics export [42]
    preserve enough of the reconstruction receipt (criteria, points, versions, hash)
@@ -587,16 +734,33 @@ useful negative-control result.
 
 9. **Determinism vs LLM assistance.** Where LLM-based criterion extraction (e.g.
    AutoPM3 [24]) or whole-classification LLM frameworks [25] add coverage, how can
-   their (non-deterministic) outputs enter a reconstructable receipt without
-   breaking the byte-for-byte guarantee — e.g. as versioned, human-signed evidence
-   events rather than as the classifier itself?
+   their (unreplayable) outputs enter a reconstructable receipt without breaking the
+   byte-for-byte guarantee — e.g. as versioned, human-signed evidence events rather
+   than as the classifier itself? The 2025 "precision grounding" result [25] suggests
+   the tractable form is LLM-as-grounded-evidence-extractor, with the extracted event
+   (and its source) carried in the bundle and the points still assigned by the
+   deterministic core.
+
+10. **Alignment with the forthcoming SVC v4.0 standard.** When the
+    ACMG/AMP/CAP/ClinGen SVC v4.0 standard [7] publishes, what is the minimal,
+    reconstructability-preserving way to adopt its two structural changes — the
+    re-labeled, concept-driven evidence codes (a new reviewable config version mapping
+    codes to the existing point core) and the **graded VUS sub-tier** (replacing
+    ReClass's single VUS bin, which is its dominant sparse-evidence failure mode in
+    §4.2, with a likelihood-banded VUS)? Does mapping point totals to SVC v4.0's VUS
+    sub-bands change any of the serious-discordance cases in §4.4, and can the engine
+    emit both the legacy five-tier and the v4.0 graded tier from one receipt during a
+    transition period?
 
 ---
 
 ## 8. Key references and sources consulted
 
-*All citations below were re-verified on 2026-06-17 (authors, venue, year, and a
-working PMID/DOI/URL). Corrections from the prior draft are noted inline.*
+*Citations were re-verified on 2026-06-17 (authors, venue, year, and a working
+PMID/DOI/URL), with a 2026-06-19 freshness pass that added refs 14b and updated refs
+7, 14, 25, 41, and 42 against primary sources (ACMG Documents-in-Development, ACMG
+2026 abstract P593, gnomAD/Nature Communications, GA4GH VRS releases, HL7 FHIR
+build). Corrections and status updates are noted inline.*
 
 ### Foundational ACMG/AMP and quantitative frameworks
 
@@ -626,10 +790,18 @@ working PMID/DOI/URL). Corrections from the prior draft are noted inline.*
    April 2025**, redirecting to ref 5.
    https://clinicalgenome.org/working-groups/sequence-variant-interpretation/
 
-7. ACMG/AMP sequence-variant interpretation guideline revision (Biesecker LG &
-   Harrison SM, co-chairs) — **in development, unpublished as of mid-2026** (ACMG
-   "Documents in Development"). Cite only as an in-development revision, not a
-   published standard.
+7. ACMG/AMP/CAP/ClinGen Sequence Variant Classification standard, **"SVC v4.0"**
+   (Biesecker LG & Harrison SM, co-chairs) — a Bayesian, points-based system with flow
+   diagrams, a graded VUS sub-tier, and an overhauled concept-driven evidence-code set.
+   **In development and unpublished as of mid-2026** (ACMG "Documents in Development",
+   "will soon be released"). Design and pilot results are public via the ACMG 2026
+   meeting abstract: Biesecker LG, Rehm HL, Abou Tayoun A, Berg JS, Bick D, Byrne AB,
+   Chao EC, Gastier-Foster JM, Karbassi I, Moyer AM, O'Donnell-Luria A, Plon SE, Shah
+   N, Vincent LM, Whiffin N, Harrison SM. "Piloting the forthcoming ACMG/AMP/CAP/ClinGen
+   standards for sequence variant classification." *Genetics in Medicine* 2026
+   (abstract **P593**; presented 2026-03-12; pilot: 17/20 variants reached >90%
+   concordance on the three-level scale). Cite only as an in-development standard and a
+   conference abstract, not a published guideline.
 
 ### Evidence calibration and source resources
 
@@ -672,7 +844,13 @@ working PMID/DOI/URL). Corrections from the prior draft are noted inline.*
     April 2024. https://gnomad.broadinstitute.org/news/2024-04-gnomad-v4-1/ ;
     Karczewski KJ, et al. The mutational constraint spectrum quantified from
     variation in 141,456 humans. *Nature* 2020;581(7809):434-443. PMID 32461654. DOI
-    10.1038/s41586-020-2308-7.
+    10.1038/s41586-020-2308-7. *(gnomAD v5 not released as of mid-2026; v4.1 current.)*
+
+14b. Kore P, Wilson MW, Tiao G, et al. Improved allele frequencies in gnomAD through
+    local ancestry inference. *Nature Communications* 2025;16(1):8734. PMID 41053080.
+    DOI 10.1038/s41467-025-63340-2. *(≥2-fold ancestry-specific frequency differences
+    for 78.5% / 85.1% of variants in admixed Admixed-American / African-American
+    groups; basis for open question 7.)*
 
 15. NCBI ClinVar introduction (https://www.ncbi.nlm.nih.gov/clinvar/intro/) and
     ClinGen Evidence Repository / ERepo (https://erepo.clinicalgenome.org/evrepo/).
@@ -718,12 +896,22 @@ working PMID/DOI/URL). Corrections from the prior draft are noted inline.*
     2025;41(7):btaf382. DOI 10.1093/bioinformatics/btaf382. PMC12263107. *(A
     criterion-specific LLM assist; relevant to open question 9.)*
 
-25. LLM-based ACMG classification (non-deterministic paradigm): Ma W, et al.
+25. LLM-based ACMG classification (the unreplayable paradigm). (a) Ma W, et al.
     "DeepSeek as the paradigm shift in rare disease diagnosis — a fully automated
     genetic variant classification system." *medRxiv* 2025.06.03.25328923
-    (**preprint**); and documented GPT-4 performance drift / nondeterminism in
-    variant assessment (arXiv:2312.13521). Cited as the contrast case for a
-    reconstructable engine; not peer-reviewed clinical tools.
+    (**preprint**); documented GPT-4 performance drift in variant assessment
+    (arXiv:2312.13521). (b) Benchmarking GPT-4o, Llama-3.1, and Qwen-2.5 for cancer
+    genetic variant classification. *npj Precision Oncology* 2025;9:s41698-025-00935-4
+    *(high self-consistency >90% on repeat, GPT-4o ~0.73 accuracy, three-model
+    consensus ~0.97 only on the 26% where all agree; O1/Claude-3.5-Sonnet/DeepSeek-R1
+    occasionally misclassify pathogenicity).* (c) "Precision Grounding: Augmenting Large
+    Language Models with Evidence-Based Databases for Trustworthy Genetic Variant
+    Summarization." *medRxiv* 2025.06.09.25329279; PMC12204447 *(grounding in curated
+    evidence DBs eliminates much hallucination — supports the LLM-as-grounded-evidence-
+    extractor boundary in open question 9).* Cited as contrast/boundary cases for a
+    reconstructable engine; not peer-reviewed clinical tools. The distinction is
+    reconstructability (version-bound, byte-replayable receipt), not run-to-run
+    determinism alone.
 
 26. Ghasemnejad T, Liang Y, Jahanian KH, et al. Comprehensive evaluation of
     ACMG/AMP-based variant classification tools. *Bioinformatics* 2026;42(2):btaf623.
@@ -817,10 +1005,16 @@ mechanism mirrors; they are not implemented as automated rules here.
     federated identification of molecular variation. *Cell Genomics*
     2021;1(2):100027. PMID 35311178. DOI 10.1016/j.xgen.2021.100027. *(Digest-based
     variant identity — the closest standards parallel to ReClass's reconstruction
-    receipt; VRS 2.0 since released.)*
+    receipt.)* **VRS 2.0 is now formally released** (2.0.0 2024-03-14 / 2.0.1
+    2024-03-20; 2.1 in development, snapshots Feb 2026), adding structural-variation
+    support, compact ambiguous representation, metadata integration, and extensibility.
+    https://vrs.ga4gh.org/ ; https://github.com/ga4gh/vrs/releases
 
-42. HL7 FHIR Genomics Reporting Implementation Guide — v3.0.0 (STU3), published
-    2024-12-12. https://hl7.org/fhir/uv/genomics-reporting/
+42. HL7 FHIR Genomics Reporting Implementation Guide — current published version
+    v3.0.0 (STU3), published 2024-12-12 (https://hl7.org/fhir/uv/genomics-reporting/);
+    **v4.0.0 in active continuous build** (snapshot 2026-01-30, FHIR R4-based, not yet
+    balloted/published — https://build.fhir.org/ig/HL7/genomics-reporting/). The
+    serializer targets the published v3.0.0.
 
 43. Dolin RH, Boxwala A, Shalaby J. vcf2fhir: a utility to convert VCF files into
     HL7 FHIR format for genomics-EHR integration. *BMC Bioinformatics*

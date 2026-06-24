@@ -129,8 +129,18 @@ def authenticate_bearer(token: str, settings: Settings) -> UserContext:
     if oidc_enabled(settings):
         try:
             return authenticate_oidc(token, settings)
-        except ValueError:
+        except ValueError as exc:
+            if settings.requires_oidc_auth:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"invalid or expired OIDC bearer token: {exc}",
+                ) from exc
             pass
+    elif settings.requires_oidc_auth:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OIDC auth mode is required but OIDC/JWKS is not configured",
+        )
     if settings.jwt_secret:
         try:
             return _user_from_jwt(_decode_jwt(token, settings.jwt_secret))

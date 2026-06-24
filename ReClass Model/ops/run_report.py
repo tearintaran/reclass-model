@@ -164,10 +164,18 @@ class RunReport:
     def failures(self) -> List[VariantOutcome]:
         return [o for o in self.outcomes if o.outcome == FAILED]
 
+    def reason_code_counts(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for outcome in self.outcomes:
+            if outcome.reason_code:
+                counts[outcome.reason_code] = counts.get(outcome.reason_code, 0) + 1
+        return counts
+
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"trigger": self.trigger}
         d.update(self.counts())
         d["detail"] = [o.to_dict() for o in self.outcomes]
+        d["reason_codes"] = self.reason_code_counts()
         d["started_at"] = self.started_at.isoformat() if self.started_at else None
         d["finished_at"] = self.finished_at.isoformat() if self.finished_at else None
         return d
