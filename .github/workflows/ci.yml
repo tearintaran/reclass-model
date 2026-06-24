@@ -85,6 +85,12 @@ jobs:
 
           python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
 
+      - name: Pre-registered held-out evaluation
+        # Re-verifies the locked config hash and the pinned holdout-partition
+        # fingerprints, scores the reserved holdout sub-split under the locked
+        # config, and fails (non-zero) if the primary hypothesis (H1) regresses.
+        run: python validation/holdout_eval.py
+
       - name: Unit and integration tests
         run: python -m unittest discover -s tests -v
 

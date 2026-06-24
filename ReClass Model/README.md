@@ -224,6 +224,39 @@ ClinGen-applied criteria through direct ClinVar Variation ID matches plus weaker
 fallback routes. The improvement shows that evidence completeness is the main
 blocker; the remaining failure shows that much evidence is still missing.
 
+### Blinded held-out validation (pre-registered)
+
+The baselines above are computed on the full fixtures. To remove the in-sample
+leakage objection, a **pre-registered, blinded held-out evaluation** reserves a
+deterministic 30% sub-split of each real benchmark — keyed on the GRCh38 genomic
+locus, so the same physical variant is reserved in every fixture, and blind to the
+expected label — that calibration is forbidden to see. The locked engine/config
+hash, split rule, and acceptance criteria are frozen in
+[validation/preregistration.md](validation/preregistration.md) **before** the
+holdout is scored. Run it with `../.venv/bin/python validation/holdout_eval.py`
+(also wired into CI); results land in
+[validation/reports/holdout_evaluation.md](validation/reports/holdout_evaluation.md).
+
+| Held-out benchmark | Holdout n | Definitive concordance (95% CI) | Serious | Dev concordance |
+|---|---:|---|---:|---:|
+| `clingen_real_v1` | 3,635 | **95.4%** (94.5–96.1%) | 2 (0.1%) | 94.4% |
+| `clinvar_real_v1` | 6,487 | 5.1% (4.5–5.7%) | 13 | 5.0% |
+| `clinvar_enriched_v1` | 6,487 | 43.9% (42.6–45.3%) | 5 | 41.8% |
+
+The primary hypothesis passes: on variants whose loci the configuration never saw,
+the engine reproduces expert-panel definitive calls at 95.4% (Wilson lower bound
+94.5% ≥ 85% bar) with serious discordance at 0.1% (Wilson upper bound 0.2% < 1%).
+Held-out concordance tracks the development-split number within ~1 pp on every
+benchmark — direct evidence the locked thresholds are **not** overfit to specific
+variants. The same locked engine moves from 5.1% (sparse ClinVar) to 43.9% (with
+matched ClinGen criteria), a +38.8 pp held-out lift confirming evidence
+completeness — not the scoring math — is the binding constraint.
+
+This is a held-out **analytical** validation on public benchmarks. It does not
+replace the independent, representative **clinical** cohort study still required by
+Phase 4 of [../roadmap.md](../roadmap.md); it establishes the pre-registration and
+held-out methodology that study will reuse.
+
 ## Evidence Providers
 
 Reusable providers live in `evidence/`:

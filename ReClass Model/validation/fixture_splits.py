@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -125,3 +126,106 @@ def assert_not_holdout(
             f"Refusing to use holdout fixture {name!r} for {purpose}; "
             "holdout data may be evaluated only after thresholds are locked."
         )
+
+
+# ---------------------------------------------------------------------------
+# Case-level holdout partition (blinded held-out evaluation)
+# ---------------------------------------------------------------------------
+#
+# The fixture-level manifests above reserve whole fixtures. The functions below
+# add a finer, per-case partition that carves a locked HOLDOUT sub-split out of a
+# real validation benchmark, leaving the remaining DEVELOPMENT sub-split for
+# tuning/calibration. Held-out concordance measured on the reserved sub-split is
+# an unbiased estimate because calibration is forbidden from seeing it.
+#
+# Design commitments (see validation/preregistration.md):
+#   * Deterministic -- SHA-256 of a salted identity string; no RNG, no wall
+#     clock, so the partition is byte-reproducible and citable.
+#   * Blind -- the identity is derived ONLY from the variant's genomic locus (or
+#     stable id), never from the expected label or any engine output, so split
+#     membership cannot be correlated with the outcome being measured.
+#   * Cross-fixture-consistent -- keyed on the GRCh38 genomic locus, so the same
+#     physical variant lands in the same sub-split in EVERY fixture it appears
+#     in; no test variant can have influenced a threshold via another fixture.
+
+HOLDOUT_PARTITION_SALT = "reclass-holdout-partition-v1"
+HOLDOUT_PARTITION_FRACTION = 0.30
+_PARTITION_RESOLUTION = 1_000_000
+
+
+def case_identity_key(case: Any) -> str:
+    """Canonical, label-blind identity for a fixture case.
+
+    Prefers the GRCh38 genomic locus (``chrom-pos-ref-alt``) so the same physical
+    variant is identified identically across fixtures; falls back to the stable
+    case ``id`` when the locus is incomplete. Never reads the expected label.
+    """
+    locus = case.get("locus") if isinstance(case, dict) else None
+    if isinstance(locus, dict):
+        chrom, pos, ref, alt = (
+            locus.get("chrom"),
+            locus.get("pos"),
+            locus.get("ref"),
+            locus.get("alt"),
+        )
+        if None not in (chrom, pos, ref, alt) and ref != "" and alt != "":
+            return f"GRCH38-{chrom}-{pos}-{ref}-{alt}".upper()
+    cid = case.get("id") if isinstance(case, dict) else None
+    if cid:
+        return f"ID:{cid}"
+    raise ValueError("case has neither a complete locus nor an id; cannot partition.")
+
+
+def case_partition(
+    case: Any,
+    *,
+    salt: str = HOLDOUT_PARTITION_SALT,
+    holdout_fraction: float = HOLDOUT_PARTITION_FRACTION,
+) -> str:
+    """Resolve a single case to :data:`DEVELOPMENT` or :data:`HOLDOUT`."""
+    key = case_identity_key(case)
+    digest = hashlib.sha256(f"{salt}:{key}".encode("utf-8")).hexdigest()
+    bucket = int(digest[:12], 16) % _PARTITION_RESOLUTION
+    threshold = int(round(holdout_fraction * _PARTITION_RESOLUTION))
+    return HOLDOUT if bucket < threshold else DEVELOPMENT
+
+
+def partition_cases(cases: list, **kwargs: Any) -> dict[str, list]:
+    """Split a list of cases into ``{development: [...], holdout: [...]}``."""
+    out: dict[str, list] = {DEVELOPMENT: [], HOLDOUT: []}
+    for case in cases:
+        out[case_partition(case, **kwargs)].append(case)
+    return out
+
+
+def development_cases(cases: list, **kwargs: Any) -> list:
+    """The tuning-visible sub-split (everything not reserved as holdout)."""
+    return [c for c in cases if case_partition(c, **kwargs) == DEVELOPMENT]
+
+
+def holdout_cases(cases: list, **kwargs: Any) -> list:
+    """The reserved, locked sub-split (never shown to calibration)."""
+    return [c for c in cases if case_partition(c, **kwargs) == HOLDOUT]
+
+
+def partition_fingerprint(cases: list, **kwargs: Any) -> dict[str, Any]:
+    """SHA-256 over the sorted holdout identity keys.
+
+    Cryptographically pins exactly which variants are reserved, so the locked
+    holdout sub-split can be cited and re-verified without shipping the case data.
+    """
+    keys = sorted(case_identity_key(c) for c in holdout_cases(cases, **kwargs))
+    digest = hashlib.sha256()
+    for key in keys:
+        digest.update(key.encode("utf-8"))
+        digest.update(b"\n")
+    return {"n_holdout": len(keys), "sha256": digest.hexdigest()}
+
+
+def partitioned_benchmark_names(fixtures_dir: str | None = None) -> set[str]:
+    """Real validation-split benchmarks that carry an internal holdout sub-split.
+
+    Development-split (synthetic) and wholly-reserved holdout fixtures are never
+    internally partitioned.
+    """
+    return set(split_members(fixtures_dir)[VALIDATION])

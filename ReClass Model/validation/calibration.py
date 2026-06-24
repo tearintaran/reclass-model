@@ -318,6 +318,8 @@ def calibrate(benchmark: dict, *, run_sensitivity: bool = True) -> dict:
         "benchmark": benchmark.get("benchmark"),
         "engine_version": C.ENGINE_VERSION,
         "config_fingerprint": C.config_fingerprint(),
+        "development_only": bool(benchmark.get("_development_only", False)),
+        "holdout_excluded": int(benchmark.get("_holdout_excluded", 0)),
         "overall": overall,
         "by_vcep": by_vcep,
         "by_ancestry": by_ancestry,
@@ -382,6 +384,11 @@ def render_markdown(a: dict) -> str:
     w(f"Engine `{a.get('engine_version')}`  |  config `{fp.get('config_hash', '')[:12]}`  "
       f"|  overrides: {', '.join(str(x) for x in fp.get('override_ids', []) if x) or 'none'}")
     w("")
+    if a.get("development_only"):
+        w(f"> Development sub-split only: {a.get('holdout_excluded', 0)} reserved "
+          f"holdout cases were excluded before calibration (anti-leakage). The "
+          f"held-out sub-split is scored only by `holdout_eval.py`.")
+        w("")
     o = a["overall"]
     w("## Overall")
     w("")
@@ -501,7 +508,20 @@ def load_benchmark(name: str) -> dict:
     if not os.path.exists(path):
         raise SystemExit(f"Benchmark '{name}' not found at {path}.")
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        benchmark = json.load(f)
+    # Anti-leakage: calibration/threshold tuning must never see the reserved
+    # holdout sub-split of a real validation benchmark. Restrict to the
+    # development sub-split at the I/O boundary so every downstream calculation
+    # (concordance, threshold-sensitivity sweeps, serious-case packets) is
+    # development-only. The held-out sub-split is evaluated solely by
+    # holdout_eval.py, after the config is locked.
+    if name in FS.partitioned_benchmark_names():
+        cases = benchmark.get("cases", []) or []
+        dev = FS.development_cases(cases)
+        benchmark["cases"] = dev
+        benchmark["_holdout_excluded"] = len(cases) - len(dev)
+        benchmark["_development_only"] = True
+    return benchmark
 
 
 def run(name: str, *, run_sensitivity: bool = True) -> dict:

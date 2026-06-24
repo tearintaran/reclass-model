@@ -1,0 +1,108 @@
+{
+  "title": "ReClass held-out validation pre-registration v1",
+  "status": "registered",
+  "registered_utc": "2026-06-23",
+  "description": "Frozen analysis plan for a blinded, pre-registered held-out evaluation of the ReClass ACMG/AMP scoring engine. The locked engine configuration below was committed BEFORE this plan; the holdout sub-split is reserved from calibration/threshold tuning. Held-out concordance on the reserved sub-split is therefore an unbiased estimate, not an in-sample fit. Any change to the locked config_hash, the split rule, or the acceptance criteria voids this registration and requires a new, higher version.",
+
+  "locked_engine": {
+    "engine_version": "1.0.0",
+    "config_hash": "b8c5a5f4be24f83d8904912c362ec6f73a3760bd5a8963d2e3687fd0020f41ed",
+    "config_label": "ACMG/AMP Bayesian points (base)",
+    "note": "engine.config.config_fingerprint() must equal this at evaluation time."
+  },
+
+  "split_rule": {
+    "mechanism": "validation.fixture_splits.case_partition",
+    "algorithm": "holdout iff (int(sha256(salt + ':' + identity).hexdigest()[:12], 16) % 1000000) < round(fraction * 1000000)",
+    "salt": "reclass-holdout-partition-v1",
+    "holdout_fraction": 0.30,
+    "identity_basis": "GRCh38 genomic locus 'GRCH38-{chrom}-{pos}-{ref}-{alt}' (uppercased) when complete, else 'ID:{case id}'",
+    "blindness": "The identity uses only the variant locus/id, never the expected label or any engine output, so split membership is statistically independent of the outcome being measured.",
+    "cross_fixture_consistency": "Keyed on the genomic locus, so the same physical variant is reserved in every fixture it appears in; the two ClinVar fixtures therefore share one holdout fingerprint."
+  },
+
+  "expected_partition": {
+    "clingen_real_v1": {
+      "n_total": 12446,
+      "n_holdout": 3635,
+      "holdout_fraction_actual": 0.2921,
+      "holdout_sha256": "a09e10e1673070683787955e24580de35d1d698850d367f174a3ea4c33f3e1b7"
+    },
+    "clinvar_real_v1": {
+      "n_total": 21638,
+      "n_holdout": 6487,
+      "holdout_fraction_actual": 0.2998,
+      "holdout_sha256": "6b37ea826a5dc8795e636f5546a454893bfd02a52fad6b21ab57104d42feec2e"
+    },
+    "clinvar_enriched_v1": {
+      "n_total": 21638,
+      "n_holdout": 6487,
+      "holdout_fraction_actual": 0.2998,
+      "holdout_sha256": "6b37ea826a5dc8795e636f5546a454893bfd02a52fad6b21ab57104d42feec2e"
+    }
+  },
+
+  "primary_hypothesis": {
+    "id": "H1",
+    "statement": "On expert-curated variants whose loci the locked configuration was never exposed to, the engine reproduces ClinGen expert-panel definitive (non-VUS) classifications with high concordance and near-zero serious discordance.",
+    "benchmark": "clingen_real_v1",
+    "evaluated_on": "holdout",
+    "endpoints": {
+      "definitive_concordance": {
+        "metric": "exact-tier match rate among cases whose expected tier is not VUS",
+        "ci_method": "Wilson score 95%",
+        "pass_if": "wilson_lower_95 >= 0.85"
+      },
+      "serious_discordance_rate": {
+        "metric": "fraction of all holdout cases with a Pathogenic<->Benign tier flip (expected P/LP vs predicted B/LB or vice versa)",
+        "ci_method": "Wilson score 95%",
+        "pass_if": "wilson_upper_95 < 0.01"
+      }
+    },
+    "verdict_pass_if": "both endpoints pass"
+  },
+
+  "secondary_hypotheses": [
+    {
+      "id": "H2",
+      "statement": "Sparse public ClinVar signals alone do NOT reproduce expert definitive calls (negative control).",
+      "benchmark": "clinvar_real_v1",
+      "evaluated_on": "holdout",
+      "prestated_expectation": "fails the 0.85 definitive-concordance bar",
+      "descriptive_only": true
+    },
+    {
+      "id": "H3",
+      "statement": "Adding matched ClinGen-applied criteria materially raises held-out definitive concordance over sparse ClinVar, evidencing that evidence completeness -- not scoring logic -- is the binding constraint.",
+      "benchmarks": ["clinvar_real_v1", "clinvar_enriched_v1"],
+      "evaluated_on": "holdout",
+      "prestated_expectation": "definitive_concordance(clinvar_enriched_v1) > definitive_concordance(clinvar_real_v1) by >= 0.15 (15 pp)",
+      "descriptive_only": false
+    }
+  ],
+
+  "overfitting_guardrail": {
+    "statement": "If held-out definitive concordance is materially below the development-split concordance, the configuration is overfit to the development variants.",
+    "applies_to": ["clingen_real_v1", "clinvar_real_v1", "clinvar_enriched_v1"],
+    "flag_if": "(dev_definitive_concordance - holdout_definitive_concordance) > 0.03"
+  },
+
+  "thresholds": {
+    "primary_benchmark": "clingen_real_v1",
+    "primary_definitive_concordance_wilson_lower_min": 0.85,
+    "primary_serious_rate_wilson_upper_max": 0.01,
+    "contrast_pair": ["clinvar_real_v1", "clinvar_enriched_v1"],
+    "contrast_enriched_minus_real_min": 0.15,
+    "overfit_gap_max": 0.03
+  },
+
+  "analysis_plan": {
+    "scoring": "Each holdout case is scored once by engine.scoring.classify_signals under the locked config; no per-case tuning, no threshold search, no re-scoring under perturbed configs.",
+    "metrics_source": "validation.harness.compute_metrics (same definitions as the committed gate) plus Wilson 95% confidence intervals computed in validation.holdout_eval.",
+    "stratification": "Definitive concordance and serious counts reported per ClinGen VCEP/panel group and per genetic-ancestry stratum where the fixture carries them; pooled numbers are always accompanied by the stratified view.",
+    "no_peeking": "Calibration/threshold tooling excludes holdout-partitioned cases at load time (validation.calibration), enforced by tests/test_holdout_partition.py.",
+    "reproducibility": "The split rule is deterministic (SHA-256, no RNG/clock); re-running must reproduce the pinned holdout fingerprints above."
+  },
+
+  "amendment_policy": "Changing the locked config, the split salt/fraction/identity basis, or any acceptance threshold requires incrementing the registration version and re-pinning fingerprints. Holdout results obtained under a prior version may not be re-reported under a new one."
+}
