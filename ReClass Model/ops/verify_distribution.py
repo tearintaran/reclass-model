@@ -55,7 +55,6 @@ def verify_distribution() -> None:
                     "wheel",
                     ".",
                     "--no-deps",
-                    "--no-build-isolation",
                     "--wheel-dir",
                     str(wheel_dir),
                 ],
