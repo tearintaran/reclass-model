@@ -8,7 +8,12 @@ import uuid
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from .audit import AuditLog, InMemoryAuditLog
-from .auth import UserContext, authenticate_bearer, legacy_user_from_tenant
+from .auth import (
+    TenantBindingLookup,
+    UserContext,
+    authenticate_bearer,
+    legacy_user_from_tenant,
+)
 from .evidence_resolver import EvidenceResolver
 from .settings import Settings, get_settings
 from .store import ClinicalStore
@@ -78,6 +83,20 @@ def _validate_tenant_uuid(tenant_id: str) -> str:
     return str(tenant_id)
 
 
+def _tenant_oidc_binding(request: Request) -> TenantBindingLookup:
+    """A per-tenant OIDC binding lookup backed by the app's tenant registry.
+
+    Returns a callable that maps ``tenant_id`` to its registered OIDC config. When no
+    registry is wired, the callable returns ``None`` for every tenant, so a federated
+    token cannot bind to any tenant (fail closed) rather than being trusted blindly.
+    """
+    store = getattr(request.app.state, "admin_store", None)
+    get_tenant = getattr(store, "get_tenant", None)
+    if get_tenant is None:
+        return lambda tenant_id: None
+    return lambda tenant_id: get_tenant(tenant_id)
+
+
 def get_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -90,7 +109,9 @@ def get_current_user(
         bearer = authorization[7:].strip()
 
     if bearer:
-        user = authenticate_bearer(bearer, settings)
+        user = authenticate_bearer(
+            bearer, settings, tenant_binding=_tenant_oidc_binding(request)
+        )
         _validate_tenant_uuid(user.tenant_id)
         if x_tenant_id and str(x_tenant_id) != user.tenant_id:
             raise HTTPException(

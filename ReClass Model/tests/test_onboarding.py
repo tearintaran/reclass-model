@@ -101,5 +101,92 @@ class TestTenantAdminApi(unittest.TestCase):
         self.assertIn("checks", readiness.json())
 
 
+class TestPlatformOperatorIsolation(unittest.TestCase):
+    """Cross-tenant registry administration is platform-only (closes the C1/H1 chain)."""
+
+    def _seed_app(self, settings):
+        admin_store = InMemoryTenantAdminStore()
+        t_a = admin_store.create_tenant(name="Lab A", slug="lab-a")
+        t_b = admin_store.create_tenant(name="Lab B", slug="lab-b")
+        app = create_app(
+            settings=settings,
+            store=InMemoryClinicalStore(),
+            resolver=EvidenceResolver(),
+            admin_store=admin_store,
+        )
+        return app, t_a["tenant_id"], t_b["tenant_id"]
+
+    @staticmethod
+    def _client_as(app, user):
+        from api.deps import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    def test_is_platform_operator_rules(self):
+        from api.auth import UserContext
+        from api.authz import is_platform_operator
+
+        staging = Settings(environment="staging",
+                           platform_admin_subjects=frozenset({"op-1"}))
+        tenant_admin = UserContext("u-1", "t-1", frozenset({"admin"}))
+        platform_op = UserContext("op-1", "t-x", frozenset({"admin"}))
+        self.assertFalse(is_platform_operator(tenant_admin, staging))  # role alone insufficient
+        self.assertTrue(is_platform_operator(platform_op, staging))    # allowlisted subject
+        self.assertTrue(is_platform_operator(tenant_admin, Settings(environment="development")))
+
+        # When bound to a platform issuer, a token from a tenant IdP is rejected.
+        bound = Settings(environment="staging", platform_admin_subjects=frozenset({"op-1"}),
+                         platform_oidc_issuer="https://platform.idp")
+        self.assertFalse(is_platform_operator(
+            UserContext("op-1", "t-x", frozenset({"admin"}), issuer="https://tenant.idp"), bound))
+        self.assertTrue(is_platform_operator(
+            UserContext("op-1", "t-x", frozenset({"admin"}), issuer="https://platform.idp"), bound))
+
+    def test_tenant_admin_confined_to_own_tenant(self):
+        from api.auth import UserContext
+        settings = Settings(environment="staging",
+                            platform_admin_subjects=frozenset({"op-1"}))
+        app, t_a, t_b = self._seed_app(settings)
+        client = self._client_as(app, UserContext("u-1", t_a, frozenset({"admin"})))
+
+        # List is scoped to the caller's own tenant only.
+        listed = client.get("/admin/tenants")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual([t["tenant_id"] for t in listed.json()], [t_a])
+
+        self.assertEqual(client.get(f"/admin/tenants/{t_a}").status_code, 200)
+        self.assertEqual(client.get(f"/admin/tenants/{t_b}").status_code, 404)  # existence hidden
+
+        # The C1/H1 chain: a tenant admin cannot rewrite ANY tenant's OIDC binding,
+        # not even its own, and cannot onboard tenants.
+        self.assertEqual(
+            client.patch(f"/admin/tenants/{t_b}", json={"oidc_issuer": "https://evil"}).status_code,
+            403,
+        )
+        self.assertEqual(
+            client.patch(f"/admin/tenants/{t_a}", json={"oidc_issuer": "https://evil"}).status_code,
+            403,
+        )
+        self.assertEqual(
+            client.post("/admin/tenants", json={"name": "X", "slug": "lab-x"}).status_code, 403
+        )
+
+    def test_platform_operator_has_full_registry_access(self):
+        from api.auth import UserContext
+        settings = Settings(environment="staging",
+                            platform_admin_subjects=frozenset({"op-1"}))
+        app, t_a, t_b = self._seed_app(settings)
+        client = self._client_as(app, UserContext("op-1", t_a, frozenset({"admin"})))
+
+        self.assertEqual(len(client.get("/admin/tenants").json()), 2)
+        self.assertEqual(client.get(f"/admin/tenants/{t_b}").status_code, 200)
+        self.assertEqual(
+            client.patch(f"/admin/tenants/{t_b}", json={"status": "active"}).status_code, 200
+        )
+        self.assertEqual(
+            client.post("/admin/tenants", json={"name": "Lab C", "slug": "lab-c"}).status_code, 201
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

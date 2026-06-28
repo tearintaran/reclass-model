@@ -352,6 +352,11 @@ class DbWebhookStore:
                 return [_jsonable(row) for row in cur.fetchall()]
 
     def due_deliveries(self, *, limit: int = 100, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        # Cross-tenant background sweep: deliberately NOT inside a tenant_session, so
+        # the worker sees every tenant's pending deliveries. With FORCE ROW LEVEL
+        # SECURITY this requires the worker's connection role to be a superuser or hold
+        # BYPASSRLS (see deploy/migrations/007_force_rls.sql and docs/deployment.md);
+        # per-request handlers stay confined by the non-privileged RECLASS_DB_ROLE.
         clock = now or _now()
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -378,6 +383,8 @@ class DbWebhookStore:
         response_body: str,
         next_attempt_at: Optional[datetime],
     ) -> Dict[str, Any]:
+        # Cross-tenant worker write (pairs with due_deliveries); same privileged-role
+        # requirement under FORCE ROW LEVEL SECURITY.
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(

@@ -13,6 +13,8 @@ Regenerate and review reports when any of the following change:
 - Evidence provider versions (REVEL, gnomAD, ClinGen fixtures)
 - Normalization/reference pipeline (GRCh38 FASTA, identity audit)
 - Operational runtime (`ops/scheduler.py`, queue semantics, alert lifecycle)
+- Case worklist/RBAC/PHI boundary (`worklist/`, `api/routers/worklist.py`,
+  `storage/worklist.py`, migration `006`)
 
 ## Routine release review set
 
@@ -23,11 +25,14 @@ Regenerate and review reports when any of the following change:
 | Unit/integration suite | `python -m unittest discover -s tests -v` | All tests pass | Engineering |
 | Synthetic validation | `python validation/harness.py synthetic_v1` | `gate_pass: true` | Engineering + clinical QA |
 | ClinGen real validation | `python validation/harness.py clingen_real_v1` | `gate_pass: true` | Clinical genetics lead |
+| Pre-registered held-out evaluation | `python validation/holdout_eval.py` | Primary hypothesis passes under pinned config/partitions | Clinical genetics lead + biostatistics |
 
 Generated artifacts:
 
 - `validation/reports/validation_report.json` (synthetic default)
 - `validation/reports/validation_report_clingen_real_v1.json`
+- `validation/reports/holdout_evaluation.json`
+- `validation/reports/holdout_evaluation.md`
 
 ### Tier 2 — required when evidence or fixtures change
 
@@ -81,6 +86,7 @@ PY="../.venv/bin/python"
 $PY -m unittest discover -s tests -v
 $PY validation/harness.py synthetic_v1
 $PY validation/harness.py clingen_real_v1
+$PY validation/holdout_eval.py
 
 # Tier 2 (when fixtures/evidence changed)
 $PY validation/harness.py clinvar_real_v1
@@ -106,6 +112,8 @@ Before promoting a release to staging/production:
 - [ ] Engine version and config reconstruction hash recorded in release notes
 - [ ] Provider versions and fixture checksums documented
 - [ ] Smoke test: API health + classify + persist + sign-off + alert lifecycle
+- [ ] Worklist smoke test: create/list/assign/transition/link classification;
+      verify default PHI redaction and audited authorized PHI read
 - [ ] Reanalysis smoke run recorded in `clinical.reanalysis_run` (staging)
 - [ ] Clinical sign-off on config changes (separate from this operational review)
 

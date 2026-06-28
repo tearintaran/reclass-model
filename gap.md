@@ -1,6 +1,6 @@
 # ReClass Unfinished Todo List
 
-Assessment date: 2026-06-19
+Assessment date: 2026-06-23
 
 This file lists only unfinished work. Completed implementation jobs, historical
 coordination notes, and validation baselines belong in the README, roadmap,
@@ -8,18 +8,23 @@ overview, and generated reports, not here.
 
 ## Latest local review and model test
 
-Review run: 2026-06-19.
+Review run: 2026-06-23.
 
 Local verification completed:
 
-- `../.venv/bin/python -m unittest discover -s tests -v`: 877 tests passed; 31
-  PostgreSQL-backed storage/RLS tests skipped because no local PostgreSQL server
-  was running.
+- `../.venv/bin/python -m unittest discover -s tests -v`: 945 tests ran
+  successfully; 914 passed and 31 PostgreSQL-backed storage/RLS tests skipped
+  because no local PostgreSQL server was running.
 - `../.venv/bin/python -m ruff check .`: passed.
-- `../.venv/bin/python -m mypy`: passed for the scoped packages (44 source files).
-- `frontend/tests/test.html`: 52/52 browser checks passed under headless Chrome.
+- `../.venv/bin/python -m mypy`: passed for the scoped packages (48 source files).
+- `frontend/tests/test.html`: 80/80 browser checks passed under headless Chrome.
 - `../.venv/bin/python -m engine.reference_cache --status`: local GRCh38 cache is
   loadable and metadata matches the recorded Ensembl release-110 checksum.
+- `../.venv/bin/python validation/holdout_eval.py`: pre-registered primary
+  hypothesis passed (ClinGen holdout 95.4%, 95% CI 94.5–96.1%; serious
+  discordance 0.1%, 95% upper bound 0.2%).
+- Repository guard and `pip check`: passed. Docker/Compose checks were not
+  available because Docker is not installed locally.
 - Single-case CLI smoke test (`PVS1` very strong + `PM2` supporting): returned
   `Likely Pathogenic`, 9.0 points, with a stable reconstruction hash.
 
@@ -30,7 +35,16 @@ Model validation still shows the strategic product gap:
 | `synthetic_v1` | PASS | 92.9% | 0 | Harness/scoring plumbing works. |
 | `clingen_real_v1` | PASS | 94.7% | 4 | Complete expert-applied criteria reproduce expert tiers well. |
 | `clinvar_real_v1` | FAIL | 5.0% | 34 | Sparse public signals are not enough. |
-| `clinvar_enriched_v1` | FAIL | 42.4% | 6 | ClinGen enrichment helps, but evidence coverage is still the blocker. |
+| `clinvar_enriched_v1` | FAIL | 47.1% | 7 | ClinGen enrichment helps, but evidence coverage is still the blocker. |
+
+The same pattern holds out of sample: the reserved ClinVar subset rises from 5.1%
+to 49.1% definitive concordance after matched ClinGen criteria are added (+44.0
+percentage points).
+
+The enriched-ClinVar numbers reflect the 2026-06-24 ACMG single-application
+correction (`engine/scoring.py` `collapse_single_application`), which scores a
+criterion supplied by both an expert ClinGen curation and the computational mapper
+once rather than double-counting it.
 
 Failure analysis for `clinvar_enriched_v1` ranks the next evidence sources by
 expected impact. These are **data-integration and clinical-validation** work items,
@@ -47,7 +61,7 @@ they are supplied:
 ## Code-actionable backlog — complete
 
 The engine and backend service-layer backlogs are now implemented and covered by the
-877-test suite, which is green in this environment. The separate customer-facing
+945-test suite, which is green in this environment. The separate customer-facing
 product and commercial code needed to ship a B2B clinical SaaS is **not** included
 here — it is a new, largely unbuilt code tranche tracked in its own section below.
 

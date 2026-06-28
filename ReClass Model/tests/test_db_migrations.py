@@ -110,6 +110,21 @@ class TestMigrationLedger(unittest.TestCase):
                 ledger_rows = cur.fetchall()
                 cur.execute("SELECT to_regclass('clinical.audit_log') AS audit_table")
                 audit_table = cur.fetchone()["audit_table"]
+                # FORCE RLS must hold on schema-defined (patient/classification) and
+                # migration-defined (webhook_delivery/worklist_case) tenant tables.
+                cur.execute(
+                    """
+                    SELECT n.nspname || '.' || c.relname AS tbl,
+                           c.relrowsecurity AS enabled,
+                           c.relforcerowsecurity AS forced
+                      FROM pg_class c
+                      JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = 'clinical'
+                       AND c.relname IN
+                           ('patient', 'classification', 'webhook_delivery', 'worklist_case')
+                    """
+                )
+                rls_rows = cur.fetchall()
 
         expected = applymod.discover_migrations()
         self.assertEqual(
@@ -119,6 +134,11 @@ class TestMigrationLedger(unittest.TestCase):
         self.assertTrue(all(row["status"] == "applied" for row in ledger_rows))
         self.assertTrue(all(len(row["checksum_sha256"]) == 64 for row in ledger_rows))
         self.assertEqual(audit_table, "clinical.audit_log")
+
+        self.assertEqual(len(rls_rows), 4, "expected all four tenant tables present")
+        for row in rls_rows:
+            self.assertTrue(row["enabled"], f"RLS not enabled on {row['tbl']}")
+            self.assertTrue(row["forced"], f"RLS not FORCEd on {row['tbl']}")
 
         self.assertEqual(
             applymod.apply(self.db),

@@ -12,6 +12,7 @@
 # Current checked PyPI versions: fastapi 0.137.1, uvicorn 0.49.0.
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
+pydantic>=2,<3
 
 # Starlette's TestClient (used by API workflow tests) needs httpx2.
 # Current checked PyPI version: httpx2 2.4.0.

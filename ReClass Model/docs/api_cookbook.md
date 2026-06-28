@@ -79,3 +79,30 @@ client.post(
 
 Outbound jobs are signed with `X-ReClass-Signature` using HMAC-SHA256 over the
 canonical JSON body and retried by `api.webhooks.deliver_due`.
+
+## Worklist Example
+
+Open and progress a de-identified case:
+
+```python
+case = client.post(
+    "/worklist/cases",
+    json={
+        "accession": "LAB-2026-0001",
+        "priority": "urgent",
+        "specimen_id": "SPEC-1",
+        "received_at": "2026-06-23T16:00:00Z",
+    },
+    headers=headers,
+).json()
+
+client.post(
+    f"/worklist/cases/{case['case_id']}/transition",
+    json={"to_status": "in_review", "note": "Assigned for evidence review"},
+    headers=headers,
+)
+```
+
+List and ordinary detail responses redact patient MRN, patient name, and
+indication. Full case context requires `GET /worklist/cases/{case_id}?include_phi=true`
+and the `case:read_phi` permission; that access is audited.

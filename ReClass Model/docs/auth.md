@@ -35,6 +35,14 @@ standard expiry claims. The verifier checks the RS256 signature against JWKS,
 issuer, audience when configured, `exp`, and `nbf`; unknown key IDs trigger a
 bounded JWKS refetch for key rotation.
 
+**Tenant binding.** A validly-signed OIDC token may act only as the tenant it is
+*bound* to: the request layer checks the token's `iss`/`aud` against the asserted
+tenant's registered `oidc_issuer`/`oidc_audience` and rejects (403) a mismatch, or a
+tenant with no registered OIDC config. Without this, a single shared IdP would let
+any signed token set `tenant_id` to a victim tenant and cross the PHI boundary
+(row-level security then *authorizes* the access because the claim was trusted).
+Register each tenant's issuer/audience via the platform-operator admin API.
+
 ES256 is intentionally not implemented in the dependency-free verifier. Use RS256
 or add a vetted crypto dependency before accepting elliptic-curve tokens.
 
@@ -78,16 +86,36 @@ This path is disabled when `RECLASS_AUTH_MODE=oidc`.
 
 | Role | Capabilities |
 |---|---|
-| `viewer` | Read classifications, reports, alerts |
-| `reviewer` | Viewer + persist drafts, sign-off, alert state changes |
-| `operator` | Reviewer + run reanalysis |
-| `admin` | All permissions including dev validation endpoint |
+| `viewer` | Read classifications, reports, alerts, and the de-identified worklist |
+| `reviewer` | Viewer + persist drafts, sign-off, alert state changes, worklist writes/transitions, and PHI-gated case detail |
+| `operator` | Operational draft/worklist/PHI/alert access + reanalysis, webhook management/emission, and security audit writes; no clinical sign-off |
+| `admin` | All tenant-scoped permissions including dev validation endpoint |
+
+### Platform operator vs. tenant admin
+
+The `admin` role is **tenant-scoped**: it administers only its own tenant. Tokens
+self-assert roles, so a tenant `admin` is *not* permitted to administer the
+cross-tenant registry (`clinical.tenant`, which holds every tenant's OIDC binding) —
+otherwise a tenant could rewrite another tenant's `oidc_issuer` and defeat the tenant
+binding above. Cross-tenant registry operations (`POST /admin/tenants`,
+`PATCH /admin/tenants/{id}`, listing/reading other tenants) require **platform-operator**
+authority:
+
+- In production a principal is a platform operator only if its token `sub` is in the
+  server-configured `RECLASS_PLATFORM_ADMINS` allowlist (and, when
+  `RECLASS_PLATFORM_OIDC_ISSUER` is set, its issuer matches the platform IdP). The
+  role alone is never sufficient.
+- In development the relaxed single-operator posture applies (any `admin` session).
+
+A tenant `admin` keeps read-only access to **its own** tenant row and readiness; a
+request for another tenant returns 404 (existence is not disclosed).
 
 Permission strings checked at the router layer include
 `classification:read`, `classification:write`, `classification:sign_off`,
 `alert:read`, `alert:write`, `reanalysis:run`, `audit:read`, `classify:preview`,
 `audit:write`, `tenant:admin`, `webhook:admin`, `webhook:emit`,
-`evidence:resolve`, and `validation:run`.
+`evidence:resolve`, `case:read`, `case:read_phi`, `case:write`,
+`case:transition`, and `validation:run`.
 
 ## Tenant header consistency
 
@@ -96,8 +124,9 @@ must match the header. A mismatch returns HTTP 403.
 
 ## Audit trail
 
-Sign-off, alert state changes, classification creation, and reanalysis runs
-are appended to the operational audit log (`GET /audit`). Structured security
+Sign-off, alert state changes, classification creation, worklist case creation/
+updates/transitions/bulk actions/PHI reads, and reanalysis runs are appended to
+the operational audit log (`GET /audit`). Structured security
 events are recorded as `security.*` actions through `POST /audit/security-events`.
 Configure `RECLASS_AUDIT_BACKEND=db` in production and apply the ordered
 migrations.
@@ -115,6 +144,8 @@ session. Do not prune production audit logs without the lab's retention approval
 | `RECLASS_OIDC_JWKS_URL` | (empty) | Identity-provider JWKS endpoint |
 | `RECLASS_OIDC_JWKS` | `{}` | Static/pinned JWKS JSON for tests or air-gapped deploys |
 | `RECLASS_AUTH_MODE` | `oidc` in prod, else `auto` | Token fallback mode |
+| `RECLASS_PLATFORM_ADMINS` | (empty) | Allowlist of platform-operator token `sub`s (comma- or JSON-list). Empty ⇒ no cross-tenant admin outside development |
+| `RECLASS_PLATFORM_OIDC_ISSUER` | (empty) | When set, a platform operator's token issuer must equal this (binds the allowlist to the platform IdP) |
 | `RECLASS_JWT_SECRET` | (empty) | HS256 signing secret |
 | `RECLASS_API_KEYS` | `{}` | Static API key map (JSON) |
 | `RECLASS_LEGACY_ROLES` | `reviewer` | Roles for dev header-only sessions |
@@ -139,7 +170,8 @@ session. Do not prune production audit logs without the lab's retention approval
 
 ## Frontend session
 
-The reviewer UI at `/reviewer/` stores API base URL, tenant UUID, and optional
-Bearer token in browser local storage. Production deployments should integrate
-with your SSO/OIDC provider and inject short-lived RS256 bearer tokens rather than
-long-lived API keys in the browser.
+The reviewer UI at `/reviewer/` stores only the API base URL and tenant UUID in
+browser local storage. Its production-safe default keeps the Bearer token in
+memory and clears it on reload; a development-only source flag can opt into token
+persistence and must not be enabled in production. Production deployments should
+integrate with SSO/OIDC and inject short-lived RS256 bearer tokens.

@@ -12,11 +12,26 @@ from ops.onboarding import preproduction_readiness_report
 from storage.admin import TenantAdminStore
 
 from ..auth import UserContext
-from ..authz import require_permission
+from ..authz import is_platform_operator, require_permission, require_platform_operator
 from ..deps import get_app_settings
 from ..settings import Settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _require_own_tenant_or_platform(
+    user: UserContext, settings: Settings, tenant_id: str
+) -> None:
+    """Allow access to ``tenant_id`` only for a platform operator or that tenant itself.
+
+    A tenant ``admin`` may read its OWN registry row; cross-tenant reads are platform
+    operations. 404 (not 403) is returned for another tenant so existence is not
+    disclosed to a non-platform caller.
+    """
+    if is_platform_operator(user, settings):
+        return
+    if str(tenant_id) != str(user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
 
 
 class TenantCreateRequest(BaseModel):
@@ -50,9 +65,10 @@ def get_admin_store(request: Request) -> TenantAdminStore:
 @router.post("/tenants", status_code=201)
 def create_tenant(
     req: TenantCreateRequest,
-    user: UserContext = Depends(require_permission("tenant:admin")),
+    user: UserContext = Depends(require_platform_operator),
     store: TenantAdminStore = Depends(get_admin_store),
 ) -> Dict[str, Any]:
+    # Onboarding a new tenant is a platform operation, not a tenant-admin one.
     try:
         return store.create_tenant(**req.model_dump())
     except ValueError as exc:
@@ -61,18 +77,25 @@ def create_tenant(
 
 @router.get("/tenants")
 def list_tenants(
+    settings: Settings = Depends(get_app_settings),
     user: UserContext = Depends(require_permission("tenant:admin")),
     store: TenantAdminStore = Depends(get_admin_store),
 ) -> List[Dict[str, Any]]:
-    return store.list_tenants()
+    # Platform operators see the whole registry; a tenant admin sees only its own row.
+    if is_platform_operator(user, settings):
+        return store.list_tenants()
+    own = store.get_tenant(user.tenant_id)
+    return [own] if own is not None else []
 
 
 @router.get("/tenants/{tenant_id}")
 def get_tenant(
     tenant_id: str,
+    settings: Settings = Depends(get_app_settings),
     user: UserContext = Depends(require_permission("tenant:admin")),
     store: TenantAdminStore = Depends(get_admin_store),
 ) -> Dict[str, Any]:
+    _require_own_tenant_or_platform(user, settings, tenant_id)
     tenant = store.get_tenant(tenant_id)
     if tenant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
@@ -83,9 +106,12 @@ def get_tenant(
 def update_tenant(
     tenant_id: str,
     req: TenantUpdateRequest,
-    user: UserContext = Depends(require_permission("tenant:admin")),
+    user: UserContext = Depends(require_platform_operator),
     store: TenantAdminStore = Depends(get_admin_store),
 ) -> Dict[str, Any]:
+    # Registry writes (including the OIDC issuer/audience that the tenant-binding
+    # auth check trusts) are platform-only, so no tenant token can rewrite another
+    # tenant's identity or its own auth binding.
     try:
         return store.update_tenant(
             tenant_id,
@@ -105,6 +131,7 @@ def tenant_readiness(
     user: UserContext = Depends(require_permission("tenant:admin")),
     store: TenantAdminStore = Depends(get_admin_store),
 ) -> Dict[str, Any]:
+    _require_own_tenant_or_platform(user, settings, tenant_id)
     tenant = store.get_tenant(tenant_id)
     if tenant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")

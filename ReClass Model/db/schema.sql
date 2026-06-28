@@ -199,6 +199,19 @@ ALTER TABLE clinical.reanalysis_event ENABLE ROW LEVEL SECURITY;
 ALTER TABLE clinical.reanalysis_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE clinical.reanalysis_run   ENABLE ROW LEVEL SECURITY;
 
+-- FORCE so the policies apply even to the table OWNER. A plain ENABLE is bypassed
+-- by the table owner (and superusers), so isolation would hold only as long as the
+-- connecting/`SET ROLE` role happened to be a non-owner. FORCE removes the owner
+-- bypass: a misconfigured tenant role (e.g. one that is the owner) can no longer
+-- silently read across tenants. Superuser / BYPASSRLS roles still bypass by design,
+-- which is the controlled path for cross-tenant background workers.
+ALTER TABLE clinical.patient          FORCE ROW LEVEL SECURITY;
+ALTER TABLE clinical.classification   FORCE ROW LEVEL SECURITY;
+ALTER TABLE clinical.alert            FORCE ROW LEVEL SECURITY;
+ALTER TABLE clinical.reanalysis_event FORCE ROW LEVEL SECURITY;
+ALTER TABLE clinical.reanalysis_queue FORCE ROW LEVEL SECURITY;
+ALTER TABLE clinical.reanalysis_run   FORCE ROW LEVEL SECURITY;
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'tenant_isolation_patient') THEN

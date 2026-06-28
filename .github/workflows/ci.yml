@@ -50,11 +50,14 @@ jobs:
           pip install -r requirements.txt -r api/requirements.txt
           pip install -e ".[api,db,dev]"
 
-      - name: Lint Job 3 surfaces
-        run: ruff check api storage ops monitoring db reporting
+      - name: Lint repository
+        run: ruff check .
 
       - name: Type check gated packages
         run: mypy
+
+      - name: Verify installable distribution
+        run: python ops/verify_distribution.py
 
       - name: Data-hygiene guard
         working-directory: ${{ github.workspace }}

@@ -22,9 +22,10 @@ engine, evidence providers,
 persistence with row-level security, API (with a pinned OpenAPI contract and
 startup preflight checks), sign-off workflow, audit logging, change-control
 reanalysis triggers, FHIR export, deployment, observability, CI, and the full
-scalable-product feature layer (Phase 8) are already scaffolded and tested (877
-tests passing). What separates this from a clinical
-product is **clinical validation, regulatory clearance, data licensing, and
+scalable-product feature layer (Phase 8) are already scaffolded and tested (945
+tests run successfully locally; 31 PostgreSQL-backed tests skip without a server).
+What separates this from a clinical product is **clinical
+validation, regulatory clearance, data licensing, and
 credentialed human accountability** — none of which are software.
 
 For a **scalable product**, the 2026-06-19 project review's code-actionable
@@ -40,7 +41,7 @@ Validation evidence already on record:
 |---|---:|---:|---:|---|
 | `clingen_real_v1` | 12,446 | 94.7% | 4 | Engine reproduces expert panel calls **when fed complete evidence** |
 | `clinvar_real_v1` | 21,638 | 5.0% | 34 | Public data **alone** is too sparse for clinical use |
-| `clinvar_enriched_v1` | 21,638 | 42.4% | 6 | Adding expert criteria helps; coverage is still the blocker |
+| `clinvar_enriched_v1` | 21,638 | 47.1% | 7 | Adding expert criteria helps; coverage is still the blocker |
 
 The strategic conclusion: the engine logic is sound; **evidence completeness,
 validation, and governance are the gating constraints.**
@@ -288,7 +289,8 @@ in routine operation.
 This phase turns the working proof of concept into a supportable product surface.
 It does not replace the clinical/regulatory gates above; it makes them enforceable
 and usable at scale. The **software for all five areas is now built and tested**
-(2026-06-19, part of the 877-test suite). What remains in each is the non-code
+(2026-06-19 foundation, verified in the 2026-06-23 945-test suite). What remains
+in each is the non-code
 hardening — real evidence population, credentialed sign-off, data licensing, and
 production identity/deployment rollout — which lives in Phases 1–7 and [gap.md](gap.md).
 
@@ -305,8 +307,12 @@ production identity/deployment rollout — which lives in Phases 1–7 and [gap.
   `release_gate.py`, and `release_packet.py` (five-state machine).
 - [x] **Continuous reanalysis product layer**: queue/run dashboards, alert
   ownership/SLA/state, failed/skipped reason-code reporting, same-tier audit
-  review, amended-report tracking, and outbound notification jobs. Built in
-  `ReClass Model/monitoring/`, `ops/`, `storage/alerts.py`, and `reporting/fhir.py`.
+  review, amended-report tracking, outbound notification jobs, and a tenant-scoped
+  case worklist with assignment, priority/SLA indicators, audited status
+  transitions, bulk actions, classification links, and a permissioned PHI
+  boundary. Built in `ReClass Model/monitoring/`, `ops/`, `worklist/`,
+  `storage/alerts.py`, `storage/worklist.py`, `api/routers/worklist.py`, and
+  `reporting/fhir.py`.
 - [x] **Enterprise deployment and security**: fail-closed production preflight,
   OIDC-only production auth mode, rate/request limits, tenant administration,
   audit-retention policy, restore-test reporting, and SLO dashboards. Built in

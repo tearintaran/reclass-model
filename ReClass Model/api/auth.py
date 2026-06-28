@@ -13,11 +13,16 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any, Callable, Dict, FrozenSet, Optional
 
 from fastapi import HTTPException, status
 
 from .settings import Settings
+
+#: A per-tenant OIDC binding lookup: ``tenant_id -> {"oidc_issuer", "oidc_audience"}``
+#: (or ``None`` when the tenant is not registered). Supplied by the request layer
+#: from the tenant registry so the auth layer stays free of storage imports.
+TenantBindingLookup = Callable[[str], Optional[Dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,10 @@ class UserContext:
     tenant_id: str
     roles: FrozenSet[str]
     display_name: str = ""
+    #: Verified token issuer (``iss``) for OIDC/JWT principals; ``None`` for API-key
+    #: and legacy-dev sessions. Used to bind platform-operator authority to a
+    #: trusted platform IdP rather than a tenant claim.
+    issuer: Optional[str] = None
 
     def has_role(self, role: str) -> bool:
         return role in self.roles or "admin" in self.roles
@@ -63,11 +72,13 @@ def _user_from_jwt(payload: Dict[str, Any]) -> UserContext:
     if isinstance(roles_raw, str):
         roles_raw = [roles_raw]
     roles = frozenset(str(r) for r in roles_raw)
+    issuer = payload.get("iss")
     return UserContext(
         user_id=str(user_id),
         tenant_id=str(tenant_id),
         roles=roles,
         display_name=str(payload.get("name") or payload.get("display_name") or user_id),
+        issuer=str(issuer) if issuer is not None else None,
     )
 
 
@@ -91,11 +102,59 @@ def oidc_enabled(settings: Settings) -> bool:
     return bool(settings.oidc_issuer and (settings.oidc_jwks_url or settings.oidc_jwks))
 
 
-def authenticate_oidc(token: str, settings: Settings) -> UserContext:
+def _audience_matches(claim: Any, expected: str) -> bool:
+    if isinstance(claim, str):
+        return claim == expected
+    if isinstance(claim, (list, tuple)):
+        return expected in [str(a) for a in claim]
+    return False
+
+
+def _enforce_tenant_oidc_binding(
+    tenant_id: str, payload: Dict[str, Any], lookup: TenantBindingLookup
+) -> None:
+    """Reject a validly-signed OIDC token whose issuer/audience are not registered
+    for the tenant it asserts.
+
+    Without this, a single platform-wide IdP lets any validly-signed token set
+    ``tenant_id`` to an arbitrary victim tenant and cross the PHI boundary (RLS then
+    *authorizes* the access because the tenant claim was trusted). Fail closed: a
+    tenant with no registered OIDC issuer cannot be asserted via a federated token.
+    """
+    try:
+        record = lookup(tenant_id)
+    except Exception:  # a registry error must never silently authorize  # noqa: BLE001
+        record = None
+    if not record or not record.get("oidc_issuer"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="tenant is not registered for federated (OIDC) authentication",
+        )
+    if str(payload.get("iss")) != str(record["oidc_issuer"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="token issuer is not bound to the asserted tenant",
+        )
+    expected_aud = record.get("oidc_audience")
+    if expected_aud and not _audience_matches(payload.get("aud"), str(expected_aud)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="token audience is not bound to the asserted tenant",
+        )
+
+
+def authenticate_oidc(
+    token: str,
+    settings: Settings,
+    *,
+    tenant_binding: Optional[TenantBindingLookup] = None,
+) -> UserContext:
     """Validate an RS256 bearer token against the configured JWKS (issuer/audience).
 
     Raises ``ValueError`` (not HTTP) so the caller can fall back to the HS256 dev path
-    or API keys for non-OIDC tokens.
+    or API keys for non-OIDC tokens. When ``tenant_binding`` is supplied, the verified
+    token's issuer/audience must additionally match the asserted tenant's registered
+    OIDC config, or a 403 is raised (cross-tenant impersonation guard).
     """
     from .oidc import decode_and_verify, jwks_client_for
 
@@ -110,15 +169,25 @@ def authenticate_oidc(token: str, settings: Settings) -> UserContext:
         issuer=settings.oidc_issuer or None,
         audience=settings.oidc_audience or None,
     )
-    return _user_from_jwt(payload)
+    user = _user_from_jwt(payload)
+    if tenant_binding is not None:
+        _enforce_tenant_oidc_binding(user.tenant_id, payload, tenant_binding)
+    return user
 
 
-def authenticate_bearer(token: str, settings: Settings) -> UserContext:
+def authenticate_bearer(
+    token: str,
+    settings: Settings,
+    *,
+    tenant_binding: Optional[TenantBindingLookup] = None,
+) -> UserContext:
     """Validate a bearer token (asymmetric OIDC RS256, HS256 JWT, or API key).
 
     OIDC is tried first when configured; a non-OIDC token (HS256 dev token, API key)
     fails OIDC validation cleanly and falls through, so the development path stays
-    intact behind ``RECLASS_API_ENV``.
+    intact behind ``RECLASS_API_ENV``. ``tenant_binding`` (when provided) is enforced
+    only for OIDC-validated tokens; HS256/API-key callers are self-issued or static
+    and are not subject to the federated tenant binding.
     """
     token = token.strip()
     if not token:
@@ -128,7 +197,7 @@ def authenticate_bearer(token: str, settings: Settings) -> UserContext:
         )
     if oidc_enabled(settings):
         try:
-            return authenticate_oidc(token, settings)
+            return authenticate_oidc(token, settings, tenant_binding=tenant_binding)
         except ValueError as exc:
             if settings.requires_oidc_auth:
                 raise HTTPException(

@@ -500,9 +500,12 @@ class TestLockedRegressionBaselines(unittest.TestCase):
             "CV-690393", "CV-432062", "CV-403662", "CV-4540582",
             "CV-866825", "CV-98738",
         ],
+        # Updated 2026-06-24 for the ACMG single-application correction
+        # (engine.scoring.collapse_single_application): enriched serious-discordance
+        # set is now 7 (was 6). clingen/clinvar_real baselines are unchanged.
         "clinvar_enriched_v1": [
             "CV-43555", "CV-17010", "CV-17004", "CV-55432",
-            "CV-54758", "CV-266331",
+            "CV-54758", "CV-266331", "CV-9212",
         ],
     }
 
@@ -536,9 +539,9 @@ class TestLockedRegressionBaselines(unittest.TestCase):
         comparison = CR._load_json(self.RAW_VS_ENRICHED)
         metrics = comparison["metrics"]
         self.assertEqual(metrics["case_count"]["delta"], 0)
-        self.assertEqual(metrics["serious_count"]["delta"], -28)
-        self.assertAlmostEqual(metrics["definitive_concordance"]["delta"], 0.3741435471189487)
-        self.assertAlmostEqual(metrics["overall_concordance"]["delta"], 0.2674923745262963)
+        self.assertEqual(metrics["serious_count"]["delta"], -27)
+        self.assertAlmostEqual(metrics["definitive_concordance"]["delta"], 0.4204200831180501)
+        self.assertAlmostEqual(metrics["overall_concordance"]["delta"], 0.3449487013587208)
 
         coverage = comparison["evidence_coverage"]["delta"]
         self.assertEqual(coverage["with_criteria"]["delta"], 11970)
@@ -556,9 +559,9 @@ class TestLockedRegressionBaselines(unittest.TestCase):
         unmatched = enriched["metrics"]["matched_unmatched"]["unmatched"]
 
         self.assertEqual(matched["n"], 11970)
-        self.assertAlmostEqual(matched["concordance"], 0.7795321637426901)
-        self.assertAlmostEqual(matched["definitive_concordance"], 0.8389000354065856)
-        self.assertEqual(matched["serious"], 3)
+        self.assertAlmostEqual(matched["concordance"], 0.9195488721804511)
+        self.assertAlmostEqual(matched["definitive_concordance"], 0.9361501239230496)
+        self.assertEqual(matched["serious"], 4)
 
         self.assertEqual(unmatched["n"], 9668)
         self.assertAlmostEqual(unmatched["concordance"], 0.07819611088125776)

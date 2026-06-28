@@ -142,9 +142,9 @@ Current enrichment summary:
 Current result:
 
 - Gate: FAIL
-- Definitive concordance: 42.4%
-- Serious discordance: 0.028% with 6 serious errors
-- Overall exact concordance: 46.6%
+- Definitive concordance: 47.1%
+- Serious discordance: 0.032% with 7 serious errors
+- Overall exact concordance: 54.4%
 
 This is a concrete evidence-integration improvement. It does not yet pass because
 many ClinVar records remain unmatched or still lack complete evidence. The

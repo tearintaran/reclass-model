@@ -1,0 +1,30 @@
+# Keep local, generated, and governed data out of image build contexts.
+.git
+.github
+.venv
+.venv-*
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+build
+dist
+
+# Local-only or regenerable genomics data.
+data/raw/*
+!data/raw/README.md
+!data/raw/*.md5
+data/cache/providers/*
+!data/cache/providers/README.md
+data/reference/*
+!data/reference/README.md
+!data/reference/install_grch38.sh
+!data/reference/GRCh38.source.json
+!data/reference/GRCh38.fa.meta.json
+
+# Generated validation and plotting artifacts.
+plots
+validation/reports

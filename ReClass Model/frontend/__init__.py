@@ -1,0 +1,1 @@
+"""Packaged reviewer application assets."""

@@ -2,7 +2,7 @@
 
 > Module: overview
 > Historical owner: `orchestrator-agent`
-> Current status: documentation aligned to the 2026-06-19 local review
+> Current status: documentation aligned to the 2026-06-23 local review
 
 This document is the compact technical overview for contributors. The
 practitioner/researcher overview lives at `../overview.md`; unfinished todos live
@@ -19,14 +19,22 @@ Orient contributors to the current local project:
   extended PVS1/PS3/BS3/PM3/PP1/PP4/splice/CNV/non-coding/complex-indel/
   mitochondrial/repeat/SV criteria layer, canonical identity, versioned
   config, monitoring diff, reanalysis helpers, operational scheduling,
-  API/reporting/sign-off service workflows, the reviewer frontend (mounted at
-  `/reviewer/`), proof-of-concept API auth/authz/audit/observability, a
+  API/reporting/sign-off service workflows, the tenant-scoped case worklist and
+  PHI boundary, the reviewer frontend (mounted at `/reviewer/`), proof-of-concept
+  API auth/authz/audit/observability, a
   containerized deployment surface, an operator CLI (`cli.py`), validation,
   calibration/comparison reporting, the single-command analytical-validation report,
   per-case serious-discordance drill-downs, diagnostic plots, real fixtures, ingest
   scripts, database schema, storage adapters, governance docs, and PostgreSQL/RLS
   tests.
-- What was most recently completed: the 2026-06-19 **scalable-product feature
+- What was most recently completed: the 2026-06-23 **pre-registered blinded
+  held-out evaluation** — a deterministic 30% holdout keyed on GRCh38 identity,
+  hidden from calibration, with a hash-pinned engine/config, frozen acceptance
+  criteria, partition fingerprints, Wilson confidence intervals, and a CI gate.
+  The primary ClinGen hypothesis passes at 95.4% definitive concordance with a
+  94.5% lower confidence bound and a 0.2% upper confidence bound on serious
+  discordance.
+- The 2026-06-19 **scalable-product feature
   layer** — an evidence workbench (`evidence/workbench.py`, `coverage.py`,
   `curation.py`) with batch/VCF/CSV import (`ingest/{batch,vcf,csv}_import.py`); an
   enforced release-gate sign-off state machine and exportable validation packets
@@ -36,19 +44,24 @@ Orient contributors to the current local project:
   enterprise platform/security layer (fail-closed preflight and OIDC-only auth in
   `api/settings.py`, rate/request limits in `api/ratelimit.py`, audit retention and
   security events in `api/audit.py`, SLO metrics in `api/observability.py`, the
-  webhook delivery subsystem in `api/webhooks.py`, and tenant administration/
-  onboarding in `api/routers/admin.py`/`ops/onboarding.py`). This built on the prior
-  upstream-evidence adapters, byte-stable cache manifests, full identity-route set
-  with ambiguity accounting, MANE/PS4 evidence-model fields, fixture splits with an
-  anti-leakage guardrail, reviewer review packets, conflict-policy checks, scoped
-  validation gates, locked regression baselines, the pinned/drift-checked OpenAPI
-  contract, FHIR amended-report transitions, change-control reanalysis triggers,
-  startup preflight checks, and the expanded GitHub Actions CI pipeline.
+  webhook delivery subsystem in `api/webhooks.py`, tenant administration/
+  onboarding in `api/routers/admin.py`/`ops/onboarding.py`, and the case worklist
+  in `worklist/`, `storage/worklist.py`, and `api/routers/worklist.py`). This built
+  on the prior upstream-evidence adapters, byte-stable cache manifests, full
+  identity-route set with ambiguity accounting, MANE/PS4 evidence-model fields,
+  fixture splits with an anti-leakage guardrail, reviewer review packets,
+  conflict-policy checks, scoped validation gates, locked regression baselines,
+  the pinned/drift-checked OpenAPI contract, FHIR amended-report transitions,
+  change-control reanalysis triggers, startup preflight checks, and the expanded
+  GitHub Actions CI pipeline.
 - What "validated" means here: validation gates report concordance and serious
   pathogenic/benign discordance for a named fixture and engine version.
-- Latest local verification: 877 tests passed; 31 PostgreSQL-backed storage/RLS
-  tests skipped locally without PostgreSQL; `ruff`, scoped `mypy`, the frontend
-  browser harness, and the GRCh38 reference-cache status check passed.
+- Latest local verification: 945 tests ran successfully (914 passed and 31
+  PostgreSQL-backed storage/RLS tests skipped locally without PostgreSQL);
+  `ruff`, scoped `mypy`, the frontend
+  browser harness (80/80), repo guard, dependency check, validation baselines,
+  held-out gate, and the GRCh38 reference-cache status check passed. Docker checks
+  were unavailable because Docker is not installed locally.
 - What remains: credentialed clinical sign-off and a formal clinical
   validation study, data licensing for clinical use, production identity-provider
   rollout plus deployment hardening, live LIS/EHR integration, and real-world
@@ -73,6 +86,7 @@ The broader service data path is:
 
 ```text
 raw public and clinical sources
+  -> tenant worklist case / accession (clinical workflow)
   -> canonical variant identity
   -> evidence provider layer with provenance
   -> standardized ACMG criteria
@@ -94,7 +108,7 @@ raw public and clinical sources
 7. `cli.py` - operator CLI (`reclass`) over the runnable workflows.
 8. `../gap.md` - unfinished todos.
 9. Source files in `engine/`, `evidence/`, `validation/`, `ingest/`,
-   `monitoring/`, `ops/`, `api/`, `reporting/`, `storage/`, and `db/`.
+   `monitoring/`, `worklist/`, `ops/`, `api/`, `reporting/`, `storage/`, and `db/`.
 
 ## Validation commands
 
@@ -109,6 +123,7 @@ Run from `ReClass Model/`:
 ../.venv/bin/python validation/harness.py clinvar_enriched_v1
 ../.venv/bin/python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
 ../.venv/bin/python validation/calibration.py clingen_real_v1
+../.venv/bin/python validation/holdout_eval.py
 ../.venv/bin/python -m engine.reference_cache --status
 ```
 
@@ -121,6 +136,8 @@ Expected current interpretation:
 - Enriched ClinVar validation still fails, but direct ClinGen matches plus
   canonical-key and genomic-HGVS fallbacks improve definitive concordance and
   reduce serious errors.
+- The pre-registered primary held-out ClinGen hypothesis passes, while the held-out
+  sparse-vs-enriched ClinVar contrast confirms evidence completeness is the blocker.
 
 ## Open items
 

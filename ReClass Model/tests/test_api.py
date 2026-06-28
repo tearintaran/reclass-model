@@ -27,6 +27,7 @@ from api.settings import Settings  # noqa: E402
 from api.store import InMemoryClinicalStore  # noqa: E402
 from evidence.gnomad import GnomadProvider  # noqa: E402
 from evidence.revel import RevelProvider  # noqa: E402
+from reclass_version import __version__ as SERVICE_VERSION  # noqa: E402
 
 
 def _resolver() -> EvidenceResolver:
@@ -61,6 +62,8 @@ class TestClassifyPreview(_ApiTestBase):
         r = self.client.get("/health")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["status"], "ok")
+        self.assertEqual(r.json()["service_version"], SERVICE_VERSION)
+        self.assertEqual(r.json()["engine_version"], "1.0.0")
 
     def test_classify_with_events_valid(self):
         body = {"evidence": {"events": [

@@ -23,6 +23,7 @@ policy, and generated benchmark reports. It is not a finished clinical product.
 | `ReClass Model/engine/` | Deterministic scoring, versioned config, canonical identity, normalization, reference providers, and reference-cache helper |
 | `ReClass Model/evidence/` | Evidence bundle model plus ClinGen, REVEL, gnomAD, AlphaMissense, conservation, gene-constraint, and extended structured-evidence providers |
 | `ReClass Model/api/` | Tenant-aware FastAPI service layer |
+| `ReClass Model/worklist/` | Tenant-scoped case/order queue, assignment, SLA/state transitions, bulk actions, classification links, and PHI-redacted views |
 | `ReClass Model/reporting/` | Technical reviewer and patient-safe summary reports |
 | `ReClass Model/validation/` | Fixtures, harness, failure analysis, comparison tool, calibration reports, plots, and generated reports |
 | `ReClass Model/ingest/` | ClinGen, ClinVar, REVEL, and targeted gnomAD benchmark builders |
@@ -32,22 +33,28 @@ policy, and generated benchmark reports. It is not a finished clinical product.
 | `ReClass Model/evidence/workbench.py`, `coverage.py`, `curation.py` | Reviewer evidence workbench, evidence-coverage roll-ups, and curation queues |
 | `ReClass Model/ingest/batch_import.py`, `vcf_import.py`, `csv_import.py` | PHI-scrubbing upstream-evidence batch import and VCF/CSV variant import with dry-run reports |
 | `ReClass Model/validation/signoff.py`, `release_gate.py`, `release_packet.py` | Five-state release-gate sign-off, scope/preflight/discordance blocking, and exportable validation packets |
-| `ReClass Model/frontend/` | Static clinician reviewer UI at `/reviewer/` plus the evidence-workbench page (`workbench.html`) |
-| `ReClass Model/deploy/` | Containerized deployment plus backup/restore scripts and the migration ledger: `Dockerfile`, `docker-compose.yml`, `backup.sh`, `restore.sh`, `migrations/001`–`005` |
+| `ReClass Model/frontend/` | Static clinician reviewer UI at `/reviewer/`, with the case worklist as the default tab plus the evidence-workbench page (`workbench.html`) |
+| `ReClass Model/deploy/` | Containerized deployment plus backup/restore scripts and the migration ledger: `Dockerfile`, `docker-compose.yml`, `backup.sh`, `restore.sh`, `migrations/001`–`006` |
 | `ReClass Model/docs/` | Governance, clinical review, release policy, conflict handling, operations SOP, deployment, auth, release review, API cookbook, and evidence-workbench docs |
 | `ReClass Model/cli.py` | Operator CLI (`reclass`) wrapping classify, validate, reference status, compare, calibration, and report regeneration |
-| `ReClass Model/tests/` | 877 tests in the current environment |
+| `ReClass Model/tests/` | 945 tests in the current environment |
 | `plots/` | PNG diagnostics generated from validation reports |
 
 Verified status:
 
-- Unit/integration suite: 877 tests passing in the current environment.
+- Unit/integration suite: 945 tests ran successfully; 914 passed and 31
+  PostgreSQL-backed tests skipped because the PostgreSQL 16 server is not running.
+- Frontend browser harness: 80/80 checks passing under headless Chrome.
+- Ruff and scoped mypy: passing (mypy checks 48 source files).
 - Synthetic validation: PASS, 92.9% definitive concordance.
 - ClinGen real validation: PASS, 94.7% definitive concordance.
 - Raw ClinVar validation: expected FAIL, 5.0% definitive concordance.
 - ClinVar enriched with direct ClinGen Variation ID, canonical SNV-key, and
-  genomic-HGVS matches: expected FAIL, but improved to 42.4% definitive
-  concordance and 6 serious errors.
+  genomic-HGVS matches: expected FAIL, but improved to 47.1% definitive
+  concordance and 7 serious errors.
+- Pre-registered held-out evaluation: PASS on the primary ClinGen endpoint
+  (95.4% definitive concordance, 95% CI 94.5–96.1%; serious discordance 0.1%,
+  95% upper bound 0.2%).
 - REVEL and gnomAD providers: implemented with mocked/offline unit tests and local
   provider caches under `data/cache/providers/`.
 - AlphaMissense, conservation, gene-constraint, and extended structured-evidence
@@ -70,7 +77,7 @@ Verified status:
 | pip 26.1.2 | Package management | Current venv is clean by `pip check` |
 | matplotlib | Diagnostic plots | Listed in requirements; harness continues if absent |
 | curl | gnomAD targeted API enrichment | Used by `ingest/enrich_gnomad.py` |
-| PostgreSQL 16 | Storage layer + RLS/reconstruction integration tests | Schema and storage tests are implemented |
+| PostgreSQL 16 | Storage layer + RLS/reconstruction/worklist integration tests | Client 16.14 is installed; no server was running during the 2026-06-23 review, so 31 DB-backed tests skipped |
 | `psycopg` | Storage layer + DB tests | Installed from `psycopg[binary]` |
 | FastAPI / uvicorn / httpx | API service and API tests | Component deps in `ReClass Model/api/requirements.txt` |
 | GRCh38 FASTA | Production-scale reference-backed normalization | Local-only cache; not committed |
@@ -114,13 +121,14 @@ cd "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model"
 Expected current result:
 
 ```text
-Ran 877 tests
-OK
+Ran 945 tests
+OK (skipped=31)
 ```
 
 PostgreSQL/RLS integration tests skip cleanly if a database is not reachable. In
-the current audited environment PostgreSQL and `psycopg` are available, so the full
-877-test suite executes.
+the current audited environment the PostgreSQL client and `psycopg` are installed,
+but the server is not running, so the 31 database-backed tests skip. Repository CI
+runs them against PostgreSQL 16.
 
 ## 5. Run validation
 
@@ -134,6 +142,7 @@ $PY validation/harness.py clingen_real_v1
 $PY validation/harness.py clinvar_real_v1
 $PY validation/harness.py clinvar_enriched_v1
 $PY validation/calibration.py clingen_real_v1
+$PY validation/holdout_eval.py
 ```
 
 Expected current outcomes:
@@ -143,7 +152,11 @@ Expected current outcomes:
 | `synthetic_v1` | PASS | 32 | 92.9% | 0 | 93.8% |
 | `clingen_real_v1` | PASS | 12,446 | 94.7% | 4 | 93.0% |
 | `clinvar_real_v1` | FAIL | 21,638 | 5.0% | 34 | 19.9% |
-| `clinvar_enriched_v1` | FAIL | 21,638 | 42.4% | 6 | 46.6% |
+| `clinvar_enriched_v1` | FAIL | 21,638 | 47.1% | 7 | 54.4% |
+
+The pre-registered holdout reserves 30% of each real fixture by variant identity.
+Its primary ClinGen endpoint passes at 95.4% definitive concordance (95% CI
+94.5–96.1%) and 0.1% serious discordance (95% upper bound 0.2%).
 
 The ClinVar failures are expected. Raw ClinVar mostly contains labels plus partial
 frequency/REVEL evidence, not complete structured ACMG evidence. The enriched

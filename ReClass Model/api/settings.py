@@ -13,7 +13,18 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, FrozenSet, Tuple
+
+
+def _parse_subjects(raw: str | None) -> FrozenSet[str]:
+    """Parse a platform-operator subject allowlist (comma- or JSON-list-encoded)."""
+    if not raw:
+        return frozenset()
+    raw = raw.strip()
+    if raw.startswith("["):
+        data = json.loads(raw)
+        return frozenset(str(s).strip() for s in data if str(s).strip())
+    return frozenset(s.strip() for s in raw.split(",") if s.strip())
 
 
 def _parse_api_keys(raw: str | None) -> Dict[str, dict]:
@@ -65,6 +76,14 @@ class Settings:
     #: is the production fail-closed mode: only RS256/JWKS OIDC bearer tokens
     #: are accepted and HS256/API-key fallback is disabled.
     auth_mode: str = "auto"
+    #: Platform-operator (cross-tenant registry administration) allowlist, by token
+    #: ``sub``. A tenant ``admin`` role is NOT sufficient for platform operations in
+    #: production: the principal must be on this server-configured list. Empty ⇒ no
+    #: platform operators outside development (fail closed). See ``authz``.
+    platform_admin_subjects: FrozenSet[str] = field(default_factory=frozenset)
+    #: When set, a platform operator's token issuer must equal this (binds the
+    #: allowlist to the platform's own IdP, not a tenant IdP).
+    platform_oidc_issuer: str = ""
     #: Audit backend name (``memory`` for dev/tests, ``db`` for production).
     audit_backend: str = "memory"
     #: Operational audit retention policy. Memory pruning is entry-count based;
@@ -125,6 +144,8 @@ def get_settings() -> Settings:
         oidc_jwks=_parse_jwks(os.environ.get("RECLASS_OIDC_JWKS")),
         api_keys=_parse_api_keys(os.environ.get("RECLASS_API_KEYS")),
         auth_mode=os.environ.get("RECLASS_AUTH_MODE") or ("oidc" if is_prod else "auto"),
+        platform_admin_subjects=_parse_subjects(os.environ.get("RECLASS_PLATFORM_ADMINS")),
+        platform_oidc_issuer=os.environ.get("RECLASS_PLATFORM_OIDC_ISSUER", ""),
         audit_backend=os.environ.get("RECLASS_AUDIT_BACKEND", "memory"),
         audit_retention_days=int(os.environ.get("RECLASS_AUDIT_RETENTION_DAYS", "365")),
         legacy_default_roles=_parse_roles(os.environ.get("RECLASS_LEGACY_ROLES")),
@@ -241,11 +262,24 @@ def _database_preflight_failures(settings: Settings) -> list[PreflightFailure]:
         with connect(settings.db_name, autocommit=True) as conn:
             with conn.cursor() as cur:
                 if settings.db_role:
-                    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (settings.db_role,))
-                    if cur.fetchone() is None:
+                    cur.execute(
+                        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = %s",
+                        (settings.db_role,),
+                    )
+                    role_row = cur.fetchone()
+                    if role_row is None:
                         failures.append(PreflightFailure(
                             "database_role",
                             f"configured RECLASS_DB_ROLE does not exist: {settings.db_role}",
+                        ))
+                    elif role_row["rolsuper"] or role_row["rolbypassrls"]:
+                        # The per-request tenant role must be unable to bypass RLS;
+                        # a superuser/BYPASSRLS role would see every tenant's rows.
+                        failures.append(PreflightFailure(
+                            "database_role_privileges",
+                            f"RECLASS_DB_ROLE {settings.db_role!r} must not be a superuser "
+                            "or have BYPASSRLS (it would bypass row-level security and "
+                            "break tenant isolation)",
                         ))
                 expected_rls = (
                     ("clinical", "patient"),
@@ -256,7 +290,7 @@ def _database_preflight_failures(settings: Settings) -> list[PreflightFailure]:
                 for schema, table in expected_rls:
                     cur.execute(
                         """
-                        SELECT c.relrowsecurity
+                        SELECT c.relrowsecurity, c.relforcerowsecurity
                           FROM pg_class c
                           JOIN pg_namespace n ON n.oid = c.relnamespace
                          WHERE n.nspname = %s AND c.relname = %s
@@ -268,6 +302,14 @@ def _database_preflight_failures(settings: Settings) -> list[PreflightFailure]:
                         failures.append(PreflightFailure(
                             "row_level_security",
                             f"RLS is not enabled for {schema}.{table}",
+                        ))
+                    elif not row["relforcerowsecurity"]:
+                        # ENABLE alone is bypassed by the table owner; FORCE is required
+                        # so the policy holds even for an owner/misconfigured role.
+                        failures.append(PreflightFailure(
+                            "row_level_security",
+                            f"RLS is not FORCEd for {schema}.{table} "
+                            "(owner or misconfigured role could bypass tenant isolation)",
                         ))
                 migrations = discover_migrations()
                 if migrations:

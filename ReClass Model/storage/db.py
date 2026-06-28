@@ -9,12 +9,17 @@ to actually isolate tenants:
    We use ``set_config('app.current_tenant', <uuid>, is_local => true)`` so it is
    scoped to the surrounding transaction and reset automatically afterwards.
 
-2. PostgreSQL **bypasses RLS for superusers and for the table owner** (unless the
-   table is ``FORCE``d). On a default local install the connecting role is a
-   superuser, so a naive connection would see every tenant's rows. To exercise —
-   and to enforce in production-like usage — RLS, ``tenant_session`` can
-   ``SET LOCAL ROLE`` to a non-superuser, non-owner role for which the policies
-   are applied. ``ensure_app_role`` / ``grant_app_role`` provision such a role.
+2. PostgreSQL **bypasses RLS for superusers and for roles with BYPASSRLS**, and —
+   *unless the table is FORCEd* — for the table owner too. Every tenant table is now
+   ``FORCE ROW LEVEL SECURITY`` (``db/schema.sql`` + ``deploy/migrations/007``), so the
+   owner is also subject to the policies; isolation no longer depends on the
+   ``SET LOCAL ROLE`` target happening to be a non-owner. ``tenant_session`` still
+   ``SET LOCAL ROLE``s to a non-superuser, non-BYPASSRLS role (``ensure_app_role`` /
+   ``grant_app_role``) for per-request work, and production preflight rejects a
+   ``RECLASS_DB_ROLE`` that is a superuser or has BYPASSRLS. The remaining bypass
+   (superuser / BYPASSRLS) is the deliberate path for cross-tenant background workers
+   such as webhook delivery, whose connection must hold that privilege while
+   per-request handlers stay confined.
 """
 from __future__ import annotations
 

@@ -243,5 +243,59 @@ class TestAuthIntegration(unittest.TestCase):
         self.assertIsNone(jwks_client_for())
 
 
+class TestTenantOidcBinding(unittest.TestCase):
+    """A validly-signed token may only act as the tenant its issuer is bound to."""
+
+    def _settings(self, **over) -> Settings:
+        base = dict(environment="production", oidc_issuer="https://idp.example",
+                    oidc_audience="reclass-api", oidc_jwks=_jwks())
+        base.update(over)
+        return Settings(**base)
+
+    @staticmethod
+    def _binding(table):
+        return lambda tenant_id: table.get(tenant_id)
+
+    def test_token_bound_to_its_tenant_is_accepted(self):
+        token = _sign_rs256(_claims(exp=9999999999, tenant_id="t-1"))
+        binding = self._binding({"t-1": {"oidc_issuer": "https://idp.example",
+                                         "oidc_audience": "reclass-api"}})
+        user = auth.authenticate_bearer(token, self._settings(), tenant_binding=binding)
+        self.assertEqual(user.tenant_id, "t-1")
+
+    def test_impersonation_rejected_when_issuer_not_bound_to_tenant(self):
+        from fastapi import HTTPException
+        # A valid token (passes signature/issuer/audience) claims tenant t-victim,
+        # but t-victim is registered to a DIFFERENT issuer -> 403, no cross-tenant access.
+        token = _sign_rs256(_claims(exp=9999999999, tenant_id="t-victim"))
+        binding = self._binding({"t-victim": {"oidc_issuer": "https://victim-idp.example"}})
+        with self.assertRaises(HTTPException) as ctx:
+            auth.authenticate_bearer(token, self._settings(), tenant_binding=binding)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_unregistered_tenant_fails_closed(self):
+        from fastapi import HTTPException
+        token = _sign_rs256(_claims(exp=9999999999, tenant_id="t-unknown"))
+        with self.assertRaises(HTTPException) as ctx:
+            auth.authenticate_bearer(token, self._settings(), tenant_binding=self._binding({}))
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_audience_must_match_registered_value(self):
+        from fastapi import HTTPException
+        token = _sign_rs256(_claims(exp=9999999999, tenant_id="t-1"))
+        binding = self._binding({"t-1": {"oidc_issuer": "https://idp.example",
+                                         "oidc_audience": "a-different-audience"}})
+        with self.assertRaises(HTTPException) as ctx:
+            auth.authenticate_bearer(token, self._settings(), tenant_binding=binding)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_no_binding_supplied_preserves_legacy_behavior(self):
+        # Direct callers that pass no binding are unaffected (binding is enforced at
+        # the request layer in deps.get_current_user).
+        token = _sign_rs256(_claims(exp=9999999999))
+        user = auth.authenticate_bearer(token, self._settings())
+        self.assertEqual(user.tenant_id, "t-1")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,7 @@ from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
 
 from engine import config as C
+from reclass_version import __version__ as SERVICE_VERSION
 
 from .audit import DbAuditLog, InMemoryAuditLog
 from .evidence_resolver import EvidenceResolver
@@ -131,7 +132,7 @@ def create_app(
 
     app = FastAPI(
         title="Variant Reclassification API",
-        version=C.ENGINE_VERSION,
+        version=SERVICE_VERSION,
         description="Tenant-aware service surface over the deterministic "
                     "ACMG/AMP reclassification engine. Decision support only — "
                     "no result is clinically released without credentialed sign-off.",
@@ -187,6 +188,7 @@ def create_app(
         )
         return {
             "status": "ok",
+            "service_version": SERVICE_VERSION,
             "engine_version": C.ENGINE_VERSION,
             "environment": settings.environment,
             "requests_total": metrics.requests_total,

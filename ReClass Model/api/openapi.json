@@ -1875,7 +1875,7 @@
   "info": {
     "description": "Tenant-aware service surface over the deterministic ACMG/AMP reclassification engine. Decision support only \u2014 no result is clinically released without credentialed sign-off.",
     "title": "Variant Reclassification API",
-    "version": "1.0.0"
+    "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {

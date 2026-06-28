@@ -27,14 +27,21 @@ but **a credentialed clinical reviewer has not yet signed them off**, and no out
 is releasable to a patient until that and the other gates in
 [`roadmap.md`](roadmap.md) are met.
 
-Latest project review: **2026-06-19**. Local checks showed the proof-of-concept
-engine and service scaffold are stable: 877 tests passed, `ruff` and scoped `mypy`
-passed, the reviewer frontend browser harness passed 52/52 checks, and the local
-GRCh38 cache was loadable with matching metadata. Thirty-one PostgreSQL-backed
-storage/RLS tests skipped locally because no PostgreSQL server was running; the CI
-workflow is configured to run PostgreSQL-backed checks.
+Latest project review: **2026-06-23**. Local checks showed the proof-of-concept
+engine and service scaffold are stable: 945 tests ran successfully (914 passed,
+31 skipped), `ruff` and scoped `mypy` passed, the reviewer frontend browser
+harness passed 80/80 checks, and the local
+GRCh38 cache was loadable with matching metadata. The skipped tests are
+PostgreSQL-backed storage/RLS checks; no local server was running, while CI is
+configured to run them against PostgreSQL.
 
-The 2026-06-19 review also defined and the project has since **built** a
+The same review re-ran all benchmark gates and the pre-registered, blinded held-out
+evaluation. Its locked ClinGen primary endpoint passed at 95.4% definitive
+concordance (95% CI 94.5–96.1%) with 0.1% serious discordance (95% upper bound
+0.2%). This is out-of-sample analytical evidence, not a substitute for the
+independent clinical cohort study still required.
+
+The 2026-06-19 review defined and the project has since **built** a
 scalable-product feature layer on top of the engine: an evidence workbench and
 evidence-coverage operations, enforced release-gate sign-off, continuous-reanalysis
 operations, enterprise deployment/security hardening, and customer-facing
@@ -145,6 +152,12 @@ ReClass currently supports:
   cohort counts, reanalysis events, alerts, and sign-off state.
 - A reviewer workflow in which persisted classifications remain **drafts** until
   credentialed sign-off.
+- A tenant-scoped **case worklist** as the default daily reviewer surface:
+  accession/specimen/order context, assignee, priority, SLA/turnaround indicators,
+  a validated draft → in-review → signed → released pipeline, audited bulk
+  assignment/transitions with per-case results, and links to classification
+  receipts. PHI fields are redacted by default and require the separate
+  `case:read_phi` permission, with access audited.
 - A clinician-facing **reviewer web application** that drives the whole workflow
   (resolve evidence → classify → review draft → view reports → sign off → triage
   alerts) against the API, presenting structured, readable views of evidence, point
@@ -261,6 +274,9 @@ ReClass currently supports:
 - **Development / validation / holdout fixture splits** with an anti-leakage
   guardrail: calibration and threshold tuning cannot read or tune against the
   holdout split — any attempt raises an error rather than silently leaking.
+- A **pre-registered blinded held-out evaluation** with a hash-pinned config,
+  deterministic cross-fixture partition fingerprints, frozen acceptance criteria,
+  Wilson confidence intervals, and a CI gate.
 - **Validation gates scoped by VCEP, gene, disease, population, and variant class**,
   so a single benchmark can pass overall yet expose a specific failing scope.
 - **Per-case reviewer review packets** carrying a machine-readable reviewer
@@ -563,12 +579,12 @@ of biological truth or clinical accuracy.
 | `synthetic_v1` | 32 | PASS | 92.9% | 0 cases | 93.8% | Confirms scoring and harness behavior |
 | `clingen_real_v1` | 12,446 | PASS | 94.7% | 4 cases | 93.0% | Expert-applied ClinGen criteria mostly reproduce expert-panel tiers |
 | `clinvar_real_v1` | 21,638 | FAIL | 5.0% | 34 cases | 19.9% | Sparse public evidence is not enough for most ClinVar labels |
-| `clinvar_enriched_v1` | 21,638 | FAIL | 42.4% | 6 cases | 46.6% | Adding matched ClinGen criteria substantially improves concordance but does not solve missing evidence |
+| `clinvar_enriched_v1` | 21,638 | FAIL | 47.1% | 7 cases | 54.4% | Adding matched ClinGen criteria substantially improves concordance but does not solve missing evidence |
 
 The key scientific lesson is that the same scoring engine performs well when it
 receives complete expert-applied evidence and poorly when the evidence is sparse.
 The main blocker is evidence completeness and evidence quality, not threshold
-loosening. The internal test suite (877 automated tests) is green in this
+loosening. The internal test suite (945 automated tests) is green in this
 environment.
 
 ---
@@ -594,10 +610,10 @@ adds ClinGen-applied ACMG criteria to matched cases.
 | Multiple ClinGen match cases resolved deterministically | 2 |
 
 Compared with raw ClinVar, enrichment raised definitive concordance from 5.0% to
-42.4%, raised overall exact concordance from 19.9% to 46.6%, and reduced serious
-pathogenic/benign discordances from 34 to 6. Per-tier recall improved most for the
+47.1%, raised overall exact concordance from 19.9% to 54.4%, and reduced serious
+pathogenic/benign discordances from 34 to 7. Per-tier recall improved most for the
 classes that depend on supplied expert evidence — Pathogenic recall rose from 0% to
-32.1% and Likely Pathogenic recall from 0% to 55.9%.
+31.1% and Likely Pathogenic recall from 0% to 85.5%.
 
 Canonical SNV-key matching now contributes real-data lift because the ClinGen-
 derived fixture exposes usable loci. Genomic HGVS matching adds further

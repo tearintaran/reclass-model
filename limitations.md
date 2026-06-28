@@ -45,7 +45,7 @@ clinical readiness or biological truth.
 | `synthetic_v1` | 32 | Hand-authored rule cases | 92.9% | 0 | The harness and scoring plumbing behave as expected on curated examples |
 | `clingen_real_v1` | 12,446 | Expert-applied ClinGen criteria supplied | 94.7% | 4 | The point model usually reproduces expert-panel tiers when supplied expert criteria |
 | `clinvar_real_v1` | 21,638 | Sparse public labels plus limited REVEL/frequency signals | 5.0% | 34 | Sparse public annotations do not reproduce expert classification |
-| `clinvar_enriched_v1` | 21,638 | ClinVar plus matched ClinGen criteria where available | 42.4% | 6 | Recovered structured criteria help substantially, but evidence coverage still limits realism |
+| `clinvar_enriched_v1` | 21,638 | ClinVar plus matched ClinGen criteria where available | 47.1% | 7 | Recovered structured criteria help substantially, but evidence coverage still limits realism |
 
 The central finding is not "the model is clinically accurate." It is that the
 scoring core is most realistic when the relevant curated evidence has already

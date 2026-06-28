@@ -3,10 +3,11 @@
 This document describes how to deploy the ReClass API, reviewer frontend, and
 PostgreSQL backend.
 
-Status as of 2026-06-19: this is a concrete local/staging deployment scaffold with
+Status as of 2026-06-23: this is a concrete local/staging deployment scaffold with
 fail-closed production preflight, OIDC-only production auth mode, rate/request
 limits, tenant administration, audit-retention hooks, webhook delivery, SLO metric
-surfaces, and a Docker/PostgreSQL test profile. It is still not a clinical
+surfaces, a tenant-scoped case worklist/PHI permission boundary, and a
+Docker/PostgreSQL test profile. It is still not a clinical
 production deployment without the validation, QMS, hosting, security-review, and
 operational controls described in `../../roadmap.md`.
 
@@ -31,6 +32,7 @@ serves the API at `http://localhost:8000`.
 - Preflight/readiness: `GET /health/preflight`
 - Metrics: `GET /metrics` (Prometheus text format)
 - Reviewer UI: `http://localhost:8000/reviewer/`
+- Worklist API: `GET /worklist/cases` and `GET /worklist/metrics`
 
 Run the full test suite against the Compose PostgreSQL service:
 
@@ -58,9 +60,24 @@ applies every `deploy/migrations/*.sql` file in filename order. Applied
 migrations are recorded in `public.reclass_schema_migrations` with filename,
 SHA-256 checksum, timestamp, duration, and status. Re-running the command skips
 matching migrations and fails if an already-applied migration file has changed.
+The current ordered set is `001` through `007`; migration `006` adds the
+tenant/RLS-isolated clinical worklist-case table, and migration `007` adds
+`FORCE ROW LEVEL SECURITY` to every tenant table.
 
 Create a tenant and application role per your lab policy. Use
 `storage/db.py` helpers (`ensure_app_role`, `grant_app_role`) to enforce RLS.
+
+**Two-role model (required under FORCE RLS).** Every tenant table is `FORCE`d, so
+even the table owner is subject to the tenant policies — isolation no longer depends
+on the connecting role being a non-owner. Configure:
+
+- `RECLASS_DB_ROLE` — a **non-superuser, non-`BYPASSRLS`** role (use `ensure_app_role`).
+  `tenant_session` `SET LOCAL ROLE`s to it for every request, so per-request handlers
+  are confined to one tenant. Production preflight **rejects** a superuser/`BYPASSRLS`
+  value here.
+- The app's **connection role** must hold `BYPASSRLS` (or be a superuser) so the
+  cross-tenant background workers (e.g. webhook delivery) can sweep all tenants'
+  pending work. It must also be a member of `RECLASS_DB_ROLE` so `SET ROLE` succeeds.
 
 ### 3. Configure environment
 
@@ -68,7 +85,7 @@ Create a tenant and application role per your lab policy. Use
 |---|---|---|
 | `RECLASS_API_ENV` | yes | `production` |
 | `RECLASS_DB` | yes | PostgreSQL database name |
-| `RECLASS_DB_ROLE` | yes | Non-superuser role for RLS |
+| `RECLASS_DB_ROLE` | yes | Per-request tenant role; must be non-superuser and non-`BYPASSRLS` (preflight-enforced) |
 | `RECLASS_AUTH_MODE` | yes | `oidc` in production; disables HS256/API-key fallback |
 | `RECLASS_OIDC_ISSUER` | yes | Expected identity-provider issuer for RS256/JWKS validation |
 | `RECLASS_OIDC_AUDIENCE` | recommended | Expected API audience when issued by the IdP |
@@ -216,7 +233,12 @@ Integrate with your log aggregator and Prometheus/Grafana stack.
 
 ## Tenant Admin, Onboarding, and Webhooks
 
-Tenant administration lives under `/admin/tenants` and requires the `admin` role.
+Tenant administration lives under `/admin/tenants`. **Cross-tenant** operations
+(creating tenants, editing any tenant's registry row including its OIDC binding,
+listing/reading other tenants) require **platform-operator** authority — a token
+`sub` in `RECLASS_PLATFORM_ADMINS` (optionally bound to `RECLASS_PLATFORM_OIDC_ISSUER`),
+not merely a tenant `admin` role. A tenant `admin` may read only its own tenant. Set
+`RECLASS_PLATFORM_ADMINS` to your operations team's subjects before go-live.
 Use `/admin/tenants/{tenant_id}/readiness` before go-live to check source-cache
 setup, reference-cache metadata, OIDC setup, a sample classification smoke test,
 and the platform preflight report.
@@ -226,6 +248,19 @@ events for `tier_crossing`, `source_snapshot_update`, `config_change`, and
 `reanalysis_completed`. Delivery jobs are HMAC-SHA256 signed with
 `X-ReClass-Signature` and retried with exponential backoff by the worker using
 `api.webhooks.deliver_due`.
+
+## Case Worklist and PHI Boundary
+
+The reviewer UI opens on the worklist. `/worklist/cases` and
+`/worklist/metrics` are tenant-scoped and use the PostgreSQL-backed store when
+`RECLASS_AUDIT_BACKEND=db` (required in production). List and ordinary detail responses redact
+patient MRN, patient name, and clinical indication. Returning those fields
+requires `include_phi=true` plus the `case:read_phi` permission, and the read is
+recorded as `case.read_phi`.
+
+Before production use, verify migration `006_worklist_cases.sql`, RLS isolation,
+role mappings for `case:*` permissions, and institutional approval for any stored
+PHI.
 
 ## Container image
 

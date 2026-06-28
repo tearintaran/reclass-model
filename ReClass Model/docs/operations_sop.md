@@ -12,7 +12,30 @@ engine config and are governed separately).
 | Reviewer | Credentialed clinical scientist | Review drafts, sign off classifications, triage alerts |
 | Admin | Lab director / QA lead | Release validation, approve config changes |
 
-## 1. Reanalysis runs
+## 1. Case worklist
+
+The reviewer UI opens on the tenant-scoped worklist. Cases represent ordered
+specimens and link to one or more classification receipts.
+
+Daily workflow:
+
+1. Filter by status, priority, assignee/unassigned, SLA state, or accession search.
+2. Assign cases individually or with the bulk assignment action.
+3. Move cases only through allowed transitions: the main path is
+   `draft → in_review → signed → released`; `on_hold` and `cancelled` are side
+   states, and released cases may reopen to `in_review` for amendment.
+4. Use bulk transition for mixed selections; review the per-case result because
+   legal cases succeed while illegal transitions are reported without rolling back
+   the whole selection.
+5. Link persisted classification receipts to the case before sign-off/release.
+6. Review overdue and due-soon metrics at the start and end of the shift.
+
+Worklist list/detail responses are de-identified by default. Requesting patient
+MRN, patient name, or indication requires `case:read_phi`; every PHI read is
+audited. Do not copy PHI into research evidence, webhook payloads, logs, or
+validation fixtures.
+
+## 2. Reanalysis runs
 
 ### When to run
 
@@ -63,7 +86,7 @@ items = queue.load_manifest('path/to/manifest.json')
 | failed | Fix root cause (cache, reference) and requeue |
 | skipped | Confirm evidence availability |
 
-## 2. Alert review
+## 3. Alert review
 
 Tier-crossing alerts appear in `GET /alerts` and the reviewer UI **Alerts** tab.
 
@@ -96,7 +119,7 @@ Triage metadata must be filled before resolution:
 - re-review outcome;
 - notification state (`not_required`, `pending`, `sent`, `acknowledged`, `failed`).
 
-## 3. Credentialed sign-off
+## 4. Credentialed sign-off
 
 A persisted classification starts as a **draft** (`is_draft: true`). It is not
 clinically releasable until sign-off.
@@ -121,7 +144,7 @@ conflict disposition, credential, authorization, effective date, and re-review d
 - Second reviewer requirement for Pathogenic / Likely Pathogenic tiers
 - Conflict resolution (e.g. BA1 vs curated pathogenic founder variants)
 
-## 4. Patient-safe summary release
+## 5. Patient-safe summary release
 
 The patient summary (`GET /classifications/{id}/report/summary`) must only be
 released **after** credentialed sign-off.
@@ -140,7 +163,7 @@ released **after** credentialed sign-off.
 - Open serious alert on the same variant without documented resolution
 - Known evidence gaps flagged in reviewer report warnings
 
-## 5. Amended FHIR reports and clinician notification
+## 6. Amended FHIR reports and clinician notification
 
 Amended reports use the FHIR outbound adapter around the signed classification.
 Each lifecycle record tracks report id, previous report id, amended/final state,
@@ -155,7 +178,7 @@ For LIS/EHR workflows:
 3. Create clinician notification rows for intended recipients.
 4. Update notification state as delivery/acknowledgement occurs.
 
-## 6. Audit and retention
+## 7. Audit and retention
 
 Operational audit entries (`GET /audit`) cover:
 
@@ -168,12 +191,14 @@ Operational audit entries (`GET /audit`) cover:
 - `classification.release_state_change`
 - `alert.triage_update`
 - `report.amended`
+- `case.create`, `case.update`, `case.transition`, `case.attach_classification`
+- `case.bulk_assign`, `case.bulk_transition`, `case.read_phi`
 
 Retain audit logs per institutional policy (recommended minimum: 7 years for
 clinical genomics). Database retention is configured at the PostgreSQL level;
 in-memory audit is for development only.
 
-## 7. Incident response
+## 8. Incident response
 
 | Symptom | Likely cause | Action |
 |---|---|---|

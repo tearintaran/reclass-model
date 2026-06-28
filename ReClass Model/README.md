@@ -10,15 +10,21 @@ human review or clinical sign-off.
 
 ## Current Status
 
-Latest local review: 2026-06-19.
+Latest local review: 2026-06-23.
 
 The proof-of-concept engine and service scaffold are healthy locally: the
-unit/integration suite reports 877 passing tests, `ruff` and scoped `mypy` pass,
-the reviewer frontend browser harness passes 52/52 checks, and the local GRCh38
+unit/integration suite ran 945 tests successfully (914 passed, 31 skipped),
+`ruff` and scoped `mypy` pass,
+the reviewer frontend browser harness passes 80/80 checks, and the local GRCh38
 reference cache is loadable with matching Ensembl release-110 metadata. The local
 test run skipped 31 PostgreSQL-backed storage/RLS tests because no PostgreSQL
 server was running; the repository CI is configured to run those against a
 PostgreSQL service.
+
+The 2026-06-23 validation update adds a pre-registered, blinded 30% held-out
+evaluation with a hash-pinned engine/config and cross-fixture partition guardrail.
+Its primary ClinGen hypothesis passes at 95.4% definitive concordance (95% CI
+94.5–96.1%) and 0.1% serious discordance (95% upper bound 0.2%).
 
 The 2026-06-19 scalable-product feature layer is built and merged on top of the
 engine: an evidence workbench with coverage/curation and batch/VCF/CSV import; an
@@ -70,6 +76,11 @@ Implemented and runnable now:
   from the API, keeps the bearer token in memory by default, renders structured
   views with loading/error/empty states, holds layout on a small viewport, and
   ships a dependency-free browser test harness under `frontend/tests/`.
+- Tenant-scoped case worklist in `worklist/`, `storage/worklist.py`,
+  `api/routers/worklist.py`, and the default reviewer UI tab: accession/specimen
+  context, assignment, priority and SLA indicators, validated case-state
+  transitions, bulk assign/transition with partial-success reporting, linked
+  classification receipts, and a separately permissioned/audited API PHI view.
 - Operator CLI in `cli.py` with `classify`, `validate`, `reference status`,
   `compare`, `calibration`, and `report` (analytical-validation and failures)
   subcommands, each offering `--json` output where useful.
@@ -92,6 +103,9 @@ Implemented and runnable now:
   serious-discordance adjudication in `validation/analyze_failures.py`; configurable
   conflict-policy checks in `validation/conflict_policy.py`; and scoped validation
   gates in `validation/analytical_validation.py`.
+- Pre-registered held-out evaluation in `validation/preregistration.md`,
+  `validation/preregistration.json`, and `validation/holdout_eval.py`, enforced in
+  CI with pinned config and partition fingerprints plus Wilson confidence intervals.
 - A pinned OpenAPI artifact (`api/openapi.json`, `api/openapi_contract.py`) with
   runnable cookbook examples (`api/cookbook_examples.py`, `docs/api_cookbook.md`),
   drift-checked in CI.
@@ -135,12 +149,16 @@ Implemented and runnable now:
   seam), `storage/admin.py` + `api/routers/admin.py` (tenant administration),
   `ops/onboarding.py` (pre-production readiness), and `api/generated_client.py`
   (typed client generated from the pinned OpenAPI contract).
-- A GitHub Actions CI pipeline (`.github/workflows/ci.yml`) running PostgreSQL-backed
-  tests, migration apply/restore rehearsal, Docker image build, generated
-  validation-report artifacts, headless frontend checks, and optional FHIR profile
-  validation.
-- 877 tests passing in the 2026-06-19 local review, with 31 PostgreSQL-backed
-  storage/RLS tests skipped locally when no PostgreSQL server was available.
+- A GitHub Actions CI pipeline (`../.github/workflows/ci.yml`) running PostgreSQL-backed
+  tests, an isolated built-wheel/runtime-asset smoke test, migration apply/restore
+  rehearsal, Docker image build, generated validation-report artifacts, headless
+  frontend checks, and optional FHIR profile validation.
+- Independent application and scoring version identities: the package/API release
+  version comes from `reclass_version.py`, while the clinically reviewed scoring
+  version remains `engine.config.ENGINE_VERSION` and continues to govern
+  reconstruction hashes.
+- The 2026-06-23 local review ran 945 tests: 914 passed and 31
+  PostgreSQL-backed storage/RLS tests skipped because no server was available.
 
 Important limitations:
 
@@ -188,20 +206,24 @@ cd "/Users/taranramadoss/Documents/Projects/First Project/ReClass Model"
 ../.venv/bin/python validation/analyze_failures.py clinvar_enriched_v1
 ../.venv/bin/python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
 ../.venv/bin/python validation/calibration.py clingen_real_v1
+../.venv/bin/python validation/holdout_eval.py
 ../.venv/bin/python -m engine.reference_cache --status
+../.venv/bin/python ops/verify_distribution.py
 ```
 
 Expected current outcomes:
 
 | Command | Expected result |
 |---|---|
-| Unit/integration tests | 877 tests pass in the current environment |
+| Unit/integration tests | 945 run successfully: 914 pass and 31 PostgreSQL-backed tests skip without a running server |
 | `validation/harness.py` | Synthetic gate PASS |
 | `validation/harness.py clingen_real_v1` | Real ClinGen gate PASS |
 | `validation/harness.py clinvar_real_v1` | Raw ClinVar gate FAIL, exposing sparse evidence |
 | `validation/harness.py clinvar_enriched_v1` | Enriched ClinVar gate FAIL, but substantially improved over raw ClinVar |
 | `validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1` | Before/after report showing improvement from ClinGen evidence |
 | `validation/calibration.py clingen_real_v1` | Writes VCEP/gene/disease calibration triage |
+| `validation/holdout_eval.py` | Pre-registered primary held-out hypothesis PASS |
+| `ops/verify_distribution.py` | Builds and installs the wheel in isolation, then verifies the API, worklist, reviewer assets, schema, migrations, and package version |
 
 ## Validation Baselines
 
@@ -210,7 +232,7 @@ Expected current outcomes:
 | `synthetic_v1` | 32 | PASS | 92.9% | 0 | 93.8% |
 | `clingen_real_v1` | 12,446 | PASS | 94.7% | 4 | 93.0% |
 | `clinvar_real_v1` | 21,638 | FAIL | 5.0% | 34 | 19.9% |
-| `clinvar_enriched_v1` | 21,638 | FAIL | 42.4% | 6 | 46.6% |
+| `clinvar_enriched_v1` | 21,638 | FAIL | 47.1% | 7 | 54.4% |
 
 `clingen_real_v1` feeds the engine ACMG criteria that expert panels applied and
 therefore tests whether the point model reproduces panel classifications.
@@ -241,16 +263,21 @@ holdout is scored. Run it with `../.venv/bin/python validation/holdout_eval.py`
 |---|---:|---|---:|---:|
 | `clingen_real_v1` | 3,635 | **95.4%** (94.5–96.1%) | 2 (0.1%) | 94.4% |
 | `clinvar_real_v1` | 6,487 | 5.1% (4.5–5.7%) | 13 | 5.0% |
-| `clinvar_enriched_v1` | 6,487 | 43.9% (42.6–45.3%) | 5 | 41.8% |
+| `clinvar_enriched_v1` | 6,487 | 49.1% (47.8–50.5%) | 6 | 46.2% |
 
 The primary hypothesis passes: on variants whose loci the configuration never saw,
 the engine reproduces expert-panel definitive calls at 95.4% (Wilson lower bound
 94.5% ≥ 85% bar) with serious discordance at 0.1% (Wilson upper bound 0.2% < 1%).
 Held-out concordance tracks the development-split number within ~1 pp on every
 benchmark — direct evidence the locked thresholds are **not** overfit to specific
-variants. The same locked engine moves from 5.1% (sparse ClinVar) to 43.9% (with
-matched ClinGen criteria), a +38.8 pp held-out lift confirming evidence
+variants. The same locked engine moves from 5.1% (sparse ClinVar) to 49.1% (with
+matched ClinGen criteria), a +44.0 pp held-out lift confirming evidence
 completeness — not the scoring math — is the binding constraint.
+
+The `clinvar_enriched_v1` figures above reflect the 2026-06-24 ACMG
+single-application correction (`engine/scoring.py` `collapse_single_application`),
+which scores a criterion supplied by both an expert ClinGen curation and the
+computational mapper once rather than double-counting it.
 
 This is a held-out **analytical** validation on public benchmarks. It does not
 replace the independent, representative **clinical** cohort study still required by
@@ -418,6 +445,8 @@ ReClass Model/
   monitoring/
     diff.py
     reanalysis.py
+  worklist/
+    case.py
   ops/
     queue.py
     scheduler.py
@@ -567,7 +596,7 @@ The surviving docs are still useful as architecture notes:
 | Module area | Current status |
 |---|---|
 | System overview | Present as `00-overview.md`, `../overview.md`, and this README |
-| Architecture | Local proof-of-concept topology with a containerized deploy path (`deploy/`) and a GitHub Actions CI pipeline (`.github/workflows/ci.yml`); a hardened production service topology remains out of scope |
+| Architecture | Local proof-of-concept topology with a containerized deploy path (`deploy/`) and a GitHub Actions CI pipeline (`../.github/workflows/ci.yml`); a hardened production service topology remains out of scope |
 | Data model/schema | SQL schema, apply tooling, storage layer, RLS, evidence-bundle, cohort-count, and reanalysis tests implemented |
 | Ingestion/normalization | Canonical identity, reference-free normalization, reference-backed left-alignment, reference-cache status helper, and real-data ingest scripts implemented |
 | Scoring | Implemented and tested with file-backed versioned config and VCEP/gene/disease override support |
@@ -576,7 +605,8 @@ The surviving docs are still useful as architecture notes:
 | Cohort PS4 | Cohort-count PS4 helpers calibrated to Hearing Loss proband-count specifications for supported dominant genes, plus denominator-aware Cardiomyopathy OR/CI support |
 | Reporting/sign-off | Technical reviewer reports, patient-safe summaries, deterministic FHIR Genomics export, draft/released status, and credentialed sign-off workflow implemented |
 | API | Tenant-aware FastAPI layer implemented |
-| Frontend | Reviewer frontend implemented (mounted at `/reviewer/`) as a proof of concept |
+| Frontend | Reviewer frontend implemented (mounted at `/reviewer/`) with a case worklist as the default daily surface and an evidence workbench |
+| Case worklist | Tenant-scoped case/order queue, assignment, SLA/priority filters, bulk actions, classification links, PHI redaction/permission boundary, audit events, and PostgreSQL persistence implemented |
 | Security/privacy | SQL RLS plus tenant-isolation, research-boundary, reconstruction, data-governance, and repo-guard tests implemented, plus a proof-of-concept API auth/authz/audit/observability layer (`api/auth.py`, `api/authz.py`, `api/oidc.py`, `api/audit.py`, `api/observability.py`) |
 | Validation | Harness, failure analysis, comparison reports, calibration reports, plots, evidence-aware summaries, and generated reports exist |
 | Roadmap | `../gap.md` lists unfinished todos; `../roadmap.md` describes the clinical/regulatory pathway |
@@ -601,7 +631,8 @@ The surviving docs are still useful as architecture notes:
 Read `../gap.md` for the unfinished todo list, and `../roadmap.md` for the forward
 clinical/regulatory pathway.
 
-The core engine, the reviewer frontend, API auth/RBAC/audit/observability,
+The core engine, the reviewer frontend and case worklist, API
+auth/RBAC/audit/observability,
 RS256/JWKS token validation, the deterministic FHIR serializer, containerized
 deployment, and the full 2026-06-19 scalable-product feature layer (evidence
 workbench/coverage/curation, batch/VCF/CSV import, enforced release-gate sign-off,

@@ -32,9 +32,11 @@ runnable core was implemented directly:
   targeted gnomAD.
 - `db/schema.sql` - clinical/research schema and RLS policies.
 - `storage/` - tenant-aware repositories, evidence-bundle persistence, cohort
-  counts, alerts, and reconstruction verifier.
+  counts, alerts, case worklist persistence, and reconstruction verifier.
+- `worklist/` - tenant-scoped case/order queue, assignment, status/SLA tracking,
+  classification links, bulk actions, and PHI-redacted views.
 - `docs/data_governance.md` - source/version/license register and cache policy.
-- `tests/` - 877 tests in the current environment.
+- `tests/` - 945 tests in the current environment.
 
 ## What you coordinate
 
@@ -61,6 +63,7 @@ Run from `ReClass Model/`:
 ../.venv/bin/python evidence/enrich_clinvar.py
 ../.venv/bin/python validation/harness.py clinvar_enriched_v1
 ../.venv/bin/python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
+../.venv/bin/python validation/holdout_eval.py
 ```
 
 Expected:
@@ -70,6 +73,8 @@ Expected:
 - Raw ClinVar and enriched ClinVar gates fail until evidence coverage improves.
 - Enriched ClinVar improves substantially over raw ClinVar and reduces serious
   errors.
+- The pre-registered held-out primary hypothesis passes under the locked
+  engine/config and partition fingerprints.
 
 ## Coordination rules
 
@@ -99,5 +104,6 @@ Expected:
 - Unit/integration tests pass.
 - Synthetic and ClinGen validation pass.
 - Raw vs enriched ClinVar comparison remains reproducible.
+- The pre-registered held-out evaluation remains reproducible and passing.
 - Source-governed, reviewer-signed, API-backed reanalysis remains reproducible
   without threshold gaming.

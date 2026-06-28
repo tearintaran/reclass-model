@@ -2,7 +2,7 @@
 
 The ReClass scoring engine reproduces expert ACMG/AMP tiers well **when it is fed
 complete evidence** (94.7% definitive concordance on the ClinGen ERepo fixture) and
-poorly on sparse public data (5.0% on raw ClinVar, 42.4% on enriched ClinVar). The
+poorly on sparse public data (5.0% on raw ClinVar, 47.1% on enriched ClinVar). The
 blocker is **evidence completeness and operational governance, not scoring
 thresholds.** The evidence workbench makes evidence completeness a first-class,
 operable surface: a place to *capture, import, track, and report on* the criteria no

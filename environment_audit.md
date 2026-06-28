@@ -1,6 +1,6 @@
 # Environment Audit
 
-Last updated: 2026-06-17 for project verification. The Homebrew/system inventory
+Last updated: 2026-06-23 for project verification. The Homebrew/system inventory
 below remains the 2026-06-16 America/Phoenix environment audit unless a line
 explicitly says it was rechecked in the project verification pass.
 
@@ -183,43 +183,52 @@ Validated from `ReClass Model/` with the rebuilt `.venv`:
 ../.venv/bin/python validation/compare_reports.py clinvar_real_v1 clinvar_enriched_v1
 ../.venv/bin/python validation/calibration.py clingen_real_v1
 ../.venv/bin/python validation/calibration.py clinvar_enriched_v1
+../.venv/bin/python validation/holdout_eval.py
 ../.venv/bin/python -m engine.reference_cache --status
-../.venv/bin/python db/apply.py
 ../.venv/bin/python validation/plots.py
+../.venv/bin/ruff check .
+../.venv/bin/mypy
 ```
 
 Results:
 
-- Unit/integration suite: 877 tests, all passing (31 PostgreSQL-backed storage/RLS
-  tests skip without a local server). Rechecked 2026-06-19 with
-  `../.venv/bin/python -m unittest discover -s tests -v` after the scalable-product
-  feature layer landed (was 781 tests on 2026-06-17).
-- Ruff: `../.venv/bin/python -m ruff check .` passed. Rechecked 2026-06-19.
-- Mypy: `../.venv/bin/python -m mypy` passed for the configured scope (44 source
-  files). Rechecked 2026-06-19.
+- Unit/integration suite: 945 tests ran successfully; 914 passed and 31
+  PostgreSQL-backed storage/RLS/worklist tests skipped because no local server
+  was running. Rechecked 2026-06-23 with
+  `../.venv/bin/python -m unittest discover -s tests -v`.
+- Ruff: `../.venv/bin/ruff check .` passed. Rechecked 2026-06-23.
+- Mypy: `../.venv/bin/mypy` passed for the configured scope (48 source files).
+  Rechecked 2026-06-23.
+- Frontend dependency-free browser harness: 80/80 checks passed under headless
+  Chrome. Rechecked 2026-06-23.
+- Repository data-hygiene guard and `pip check`: passed.
 - Synthetic benchmark: GATE PASS, 92.9% definitive concordance, 0 serious
-  discordances, 93.8% overall exact concordance. Rechecked 2026-06-17.
+  discordances, 93.8% overall exact concordance. Rechecked 2026-06-23.
 - ClinGen real benchmark: GATE PASS, 94.7% definitive concordance, 4 serious
   discordances, 93.0% overall exact concordance.
 - ClinVar raw benchmark: GATE FAIL as expected, 5.0% definitive concordance, 34
   serious discordances, 19.9% overall exact concordance.
-- ClinVar enriched benchmark: GATE FAIL as expected, but improved to 42.4%
-  definitive concordance, 6 serious discordances, 46.6% overall exact concordance.
-- Raw vs enriched comparison: definitive concordance +37.4 percentage points,
-  overall exact concordance +26.7 percentage points, serious discordance count -28
-  (34 to 6).
+- ClinVar enriched benchmark: GATE FAIL as expected, but improved to 47.1%
+  definitive concordance, 7 serious discordances, 54.4% overall exact concordance.
+- Raw vs enriched comparison: definitive concordance +42.1 percentage points,
+  overall exact concordance +34.5 percentage points, serious discordance count -27
+  (34 to 7).
+- Pre-registered held-out evaluation: primary hypothesis PASS. The ClinGen
+  holdout reached 95.4% definitive concordance (95% CI 94.5–96.1%) with 0.1%
+  serious discordance (95% upper bound 0.2%). The same held-out ClinVar variants
+  improved from 5.1% to 49.1% after enrichment (+44.0 percentage points).
 - Reference cache status helper: a local GRCh38 FASTA (Ensembl release-110) is now
   installed and reported present; identity audits were re-run reference-backed.
 - Calibration reports: generated for ClinGen real and enriched ClinVar, including
   low-performing groups, serious-discordance triage, and threshold sensitivity.
 - REVEL and gnomAD provider tests: pass offline with mocked/local data.
 - API/reporting tests: pass without requiring a live database.
-- Storage/ops/reanalysis tests: pass against PostgreSQL in the current environment.
-- Schema apply and migration ledger: succeed against the local PostgreSQL
-  environment.
-- Database backup/restore rehearsal: `tests.test_db_migrations` passed against
-  PostgreSQL, including a real backup, restore into a fresh database, reconstruction
-  verification, and RLS isolation checks.
+- PostgreSQL client 16.14 and `psycopg` are installed, but `pg_isready` reported
+  no server response on port 5432 during this review. The 31 database-backed
+  tests, schema apply, migration ledger, and backup/restore rehearsal therefore
+  were not exercised locally; CI is configured to run them against PostgreSQL 16.
+- Docker is not installed in this environment, so the Docker image build and
+  Compose configuration checks remain CI-only for this review.
 - Diagnostic plot generation: works and writes PNG diagnostics.
 
 ## Remaining Environment Warnings

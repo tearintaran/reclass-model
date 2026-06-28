@@ -9,7 +9,7 @@ re-verified every code-grounded claim below against the current repository
 `reporting/fhir.py`, and the validation/comparison/failure reports *regenerated
 2026-06-19*) and re-checked the headline numbers (`synthetic_v1` 92.9% / 0 serious;
 `clingen_real_v1` 94.7% / 4 serious; `clinvar_real_v1` 5.0% / 34 serious;
-`clinvar_enriched_v1` 42.4% / 6 serious; the 5.0%→42.4% enrichment lift and its
+`clinvar_enriched_v1` 47.1% / 7 serious; the 5.0%→47.1% enrichment lift and its
 confusion-matrix deltas; the named GJB2/SLC26A4/HNF4A and BRCA1 serious-error
 cases), all of which **still hold** after the 2026-06-19 report regeneration. The
 2026-06-17 pass had already corrected several inherited citation errors (Genome
@@ -98,7 +98,7 @@ Validation in this snapshot:
 | `synthetic_v1` | 32 | PASS | 92.9% | 0 | 93.8% |
 | `clingen_real_v1` | 12,446 | PASS | 94.7% | 4 | 93.0% |
 | `clinvar_real_v1` | 21,638 | FAIL | 5.0% | 34 | 19.9% |
-| `clinvar_enriched_v1` | 21,638 | FAIL | 42.4% | 6 | 46.6% |
+| `clinvar_enriched_v1` | 21,638 | FAIL | 47.1% | 7 | 54.4% |
 
 These are concordance-with-reference numbers, not proof of biological truth or
 clinical readiness.
@@ -460,19 +460,19 @@ concordance and reduces serious errors.
 adding matched ClinGen-applied criteria to 11,970 of 21,638 ClinVar records
 (10,649 via direct ClinVar Variation ID + 940 via canonical SNV-key fallback +
 381 via genomic-HGVS fallback; 37,873 criteria added in total) moved definitive
-concordance from 5.0% to 42.4%
-(+37.4 pp), overall exact concordance from 19.9% to 46.6% (+26.7 pp), and serious
-discordance count from 34 to 6. Pathogenic recall moved from 0% to 32.1%; Likely
-Pathogenic recall from 0% to 55.9%. The transfer is not free: 1,023 cases worsened
+concordance from 5.0% to 47.1%
+(+42.1 pp), overall exact concordance from 19.9% to 54.4% (+34.5 pp), and serious
+discordance count from 34 to 7. Pathogenic recall moved from 0% to 31.1%; Likely
+Pathogenic recall from 0% to 85.5%. The transfer is not free: 321 cases worsened
 (mostly former VUS-by-default now overshooting), which the report quantifies
 case-by-case.
 
 **Which reclassifications the enrichment produced.** Because the fixture
 population, engine, and config are held fixed, every changed call is attributable
 to the transferred ClinGen criteria alone. Relative to the unenriched baseline,
-6,807 cases *became* an exact match to the reference tier and 1,019 *lost* a
-previously exact one (net +5,788 exact, consistent with the 19.9% -> 46.6%
-headline; 6,993 cases moved closer to the reference and 1,023 moved farther). Read
+7,780 cases *became* an exact match to the reference tier and 316 *lost* a
+previously exact one (net +7,464 exact, consistent with the 19.9% -> 54.4%
+headline; 8,041 cases moved closer to the reference and 321 moved farther). Read
 directly from the comparison report's confusion-matrix deltas (after - before), the
 corrective reclassifications are overwhelmingly movements *out of the
 VUS-by-default trap* into the reference tier:
@@ -617,7 +617,7 @@ calls, clocks, randomness, or live source drift.
 **Project evidence.** The scoring core is pure; committed fixtures live under
 `validation/fixtures/`; generated validation reports are reproducible artifacts
 under `validation/reports/`; diagnostic plots are written under `plots/`; source
-governance is documented. The 877-test suite is green in this environment, and
+governance is documented. The 945-test suite is green in this environment, and
 storage/reanalysis tests that need PostgreSQL skip cleanly when unavailable.
 
 **Extension beyond literature.** This addresses a known reproducibility weakness in
@@ -661,7 +661,7 @@ ReClass supports this by running the same engine under three evidence conditions
 1. Expert-applied ClinGen criteria -> high concordance (94.7% definitive).
 2. Sparse ClinVar public signals -> poor concordance (5.0% definitive).
 3. ClinVar plus matched ClinGen evidence -> large but incomplete improvement
-   (42.4% definitive).
+   (47.1% definitive).
 
 This is a genuine research extension because it changes the question from "can a
 rule engine classify variants?" to "which missing evidence and provenance links

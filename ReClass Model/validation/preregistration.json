@@ -2,7 +2,15 @@
   "title": "ReClass held-out validation pre-registration v1",
   "status": "registered",
   "registered_utc": "2026-06-23",
-  "description": "Frozen analysis plan for a blinded, pre-registered held-out evaluation of the ReClass ACMG/AMP scoring engine. The locked engine configuration below was committed BEFORE this plan; the holdout sub-split is reserved from calibration/threshold tuning. Held-out concordance on the reserved sub-split is therefore an unbiased estimate, not an in-sample fit. Any change to the locked config_hash, the split rule, or the acceptance criteria voids this registration and requires a new, higher version.",
+  "description": "Analysis plan for a held-out evaluation of the ReClass ACMG/AMP scoring engine. Leakage control is unconditional: the locked engine configuration below was committed BEFORE this plan, and the holdout sub-split is reserved from calibration/threshold tuning, so held-out concordance on the reserved sub-split is out-of-sample, not an in-sample fit. Blinding of acceptance bars is PARTIAL and disclosed below: only the H1 gating bars are a-priori (committed in harness.py at the initial commit, 2026-06-16); the H3 contrast and overfit thresholds are descriptive, set after population-level full-fixture results were already computed. Any change to the locked config_hash, the split rule, or the acceptance criteria voids this registration and requires a new, higher version.",
+
+  "disclosure": {
+    "blinding_is_partial": true,
+    "visible_before_registration": "Population-level results on the FULL fixtures were committed in validation_report.md (commit 6a41bf5, 2026-06-23) ~17 minutes before this plan (commit 1bb7ed9): ClinGen definitive concordance ~94.7%, raw ClinVar ~5.0%, enriched ClinVar ~42.4%, enrichment lift ~+37.4pp. The magnitudes of all reported effects were known at registration time.",
+    "a_priori_thresholds": "Only H1 (definitive-concordance floor 0.85, serious-discordance ceiling 0.01) predates all data; both bars lived in harness.py from the initial commit (2026-06-16).",
+    "unseen_until_evaluation": "The held-out SUB-SPLIT point estimates and confidence intervals reported here were not computed until the locked evaluation run. The split is label-blind and deterministic, so holdout membership could not be chosen to flatter the result.",
+    "not_blinded_thresholds": "H3 (>=15pp contrast) and the overfit guardrail (3pp) were set with the population effect sizes above already visible; they are descriptive, comfortably-cleared thresholds, not blind a-priori predictions."
+  },
 
   "locked_engine": {
     "engine_version": "1.0.0",
@@ -59,7 +67,8 @@
         "pass_if": "wilson_upper_95 < 0.01"
       }
     },
-    "verdict_pass_if": "both endpoints pass"
+    "verdict_pass_if": "both endpoints pass",
+    "threshold_basis": "a priori — both bars committed in harness.py at the initial commit (2026-06-16), before any benchmark result existed"
   },
 
   "secondary_hypotheses": [
@@ -77,14 +86,16 @@
       "benchmarks": ["clinvar_real_v1", "clinvar_enriched_v1"],
       "evaluated_on": "holdout",
       "prestated_expectation": "definitive_concordance(clinvar_enriched_v1) > definitive_concordance(clinvar_real_v1) by >= 0.15 (15 pp)",
-      "descriptive_only": false
+      "descriptive_only": false,
+      "threshold_basis": "descriptive — the 15pp bar was set with the population-level +37.4pp lift already visible; not a blind a-priori prediction"
     }
   ],
 
   "overfitting_guardrail": {
     "statement": "If held-out definitive concordance is materially below the development-split concordance, the configuration is overfit to the development variants.",
     "applies_to": ["clingen_real_v1", "clinvar_real_v1", "clinvar_enriched_v1"],
-    "flag_if": "(dev_definitive_concordance - holdout_definitive_concordance) > 0.03"
+    "flag_if": "(dev_definitive_concordance - holdout_definitive_concordance) > 0.03",
+    "threshold_basis": "descriptive — the 3pp tolerance was set with dev-vs-holdout gaps (<=2.2pp) already observed; not blinded"
   },
 
   "thresholds": {

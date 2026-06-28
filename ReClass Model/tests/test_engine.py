@@ -131,6 +131,64 @@ class TestClassify(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# ACMG single-application (each criterion scored at most once)                 #
+# --------------------------------------------------------------------------- #
+class TestSingleApplication(unittest.TestCase):
+    def test_computational_duplicate_keeps_strongest(self):
+        # Same criterion (PP3) from two computational mappers must not stack;
+        # the strongest single contribution is kept.
+        ev = [
+            EvidenceEvent("revel", "PP3", "pathogenic", applied_strength="strong"),
+            EvidenceEvent("conservation", "PP3", "pathogenic", applied_strength="supporting"),
+        ]
+        r = classify(ev)
+        self.assertEqual([c.acmg_criterion for c in r.contributions], ["PP3"])
+        self.assertEqual(r.total_points, 4.0)  # strong only, not strong+supporting
+        self.assertTrue(any("single-application" in o for o in r.overrides))
+
+    def test_expert_curation_preferred_over_computational(self):
+        # An expert (ClinGen) strength wins over the engine's own computational
+        # derivation of the same criterion, even when the computational one is stronger.
+        ev = [
+            EvidenceEvent("revel", "BP4", "benign", applied_strength="moderate"),
+            EvidenceEvent("clingen", "BP4", "benign", applied_strength="supporting"),
+        ]
+        r = classify(ev)
+        self.assertEqual(len(r.contributions), 1)
+        self.assertEqual(r.contributions[0].source, "clingen")
+        self.assertEqual(r.total_points, -1.0)  # clingen supporting, not revel moderate
+
+    def test_distinct_criteria_are_not_collapsed(self):
+        ev = [
+            EvidenceEvent("revel", "PP3", "pathogenic", applied_strength="strong"),
+            EvidenceEvent("gnomad", "PM2", "pathogenic", applied_strength="supporting"),
+        ]
+        r = classify(ev)
+        self.assertEqual(
+            sorted(c.acmg_criterion for c in r.contributions), ["PM2", "PP3"]
+        )
+        self.assertEqual(r.total_points, 5.0)
+        self.assertEqual(r.overrides, [])
+
+    def test_no_tier_flip_from_double_count(self):
+        # Regression: gnomAD PM2 + REVEL PP3 + conservation PP3 must stay VUS (5 pts),
+        # not be pushed to Likely Pathogenic (6 pts) by a double-counted PP3.
+        r = classify_signals({"gnomad_af": 1e-6, "revel": 0.95, "conservation": 3.0})
+        self.assertEqual(r.tier, "VUS")
+        self.assertEqual(r.total_points, 5.0)
+
+    def test_reconstruction_hash_over_original_evidence(self):
+        # The hash is taken over the original (pre-collapse) inputs, so a stored
+        # classification still re-derives from exactly what was supplied.
+        ev = [
+            EvidenceEvent("revel", "PP3", "pathogenic", applied_strength="strong"),
+            EvidenceEvent("conservation", "PP3", "pathogenic", applied_strength="supporting"),
+        ]
+        r = classify(ev, engine_version="1.0.0")
+        self.assertEqual(r.reconstruction_hash, reconstruction_hash(ev, "1.0.0"))
+
+
+# --------------------------------------------------------------------------- #
 # Determinism / reconstruction hash                                           #
 # --------------------------------------------------------------------------- #
 class TestReconstructionHash(unittest.TestCase):

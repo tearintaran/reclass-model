@@ -120,6 +120,81 @@ def reconstruction_hash(evidence: List[EvidenceEvent], engine_version: str) -> s
 
 
 # --------------------------------------------------------------------------- #
+# ACMG/AMP single-application normalization                                   #
+# --------------------------------------------------------------------------- #
+# Source identifiers the engine's OWN computational mappers emit. Anything not in
+# this set -- ClinGen/VCEP-applied criteria, hand-curated criteria, cohort evidence
+# fed through the `criteria` list or an expert provider -- is treated as
+# expert/curated. ACMG/AMP requires each criterion to be applied at most once; when
+# the same criterion is supplied by more than one source, an expert strength is not
+# overridden by the engine's own computational derivation of the same criterion.
+_COMPUTATIONAL_SOURCES = frozenset({
+    "revel", "gnomad", "alphamissense", "conservation",
+    "revel+alphamissense", "missense_consensus",
+    "pvs1", "functional_assay", "in_trans", "segregation", "phenotype",
+    "splice", "cnv", "noncoding", "complex_indel", "mito", "repeat", "sv",
+})
+
+
+def _is_curated(event: "EvidenceEvent") -> bool:
+    """True for expert/curated criteria (anything not from a computational mapper)."""
+    return event.source not in _COMPUTATIONAL_SOURCES
+
+
+def collapse_single_application(
+    evidence: List[EvidenceEvent],
+    strength_points: Optional[Dict[str, int]] = None,
+) -> Tuple[List[EvidenceEvent], List[str]]:
+    """Enforce ACMG/AMP single-application: each criterion contributes at most once.
+
+    When the same ``acmg_criterion`` is emitted more than once (e.g. PP3 from both an
+    expert ClinGen curation and the engine's REVEL/conservation derivation), keep ONE
+    contribution under a fixed policy: **prefer an expert/curated source**; among
+    equally-curated (or all-computational) duplicates keep the strongest by absolute
+    points. Without this, two sources agreeing on a criterion would double-count it and
+    can flip a tier (the historical defect). Returns the deduplicated events (first
+    occurrence preserves order) and human-readable notes for each dropped duplicate.
+    """
+    def magnitude(e: EvidenceEvent) -> float:
+        try:
+            return abs(e.signed_points(strength_points))
+        except (ValueError, KeyError, TypeError):
+            return 0.0
+
+    order: List[str] = []
+    groups: Dict[str, List[EvidenceEvent]] = {}
+    for e in evidence:
+        key = e.acmg_criterion.upper()
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(e)
+
+    kept: List[EvidenceEvent] = []
+    dropped_notes: List[str] = []
+    for key in order:
+        bucket = groups[key]
+        if len(bucket) == 1:
+            kept.append(bucket[0])
+            continue
+        curated = [e for e in bucket if _is_curated(e)]
+        pool = curated if curated else bucket
+        winner = max(pool, key=magnitude)  # ties keep first occurrence (stable max)
+        kept.append(winner)
+        basis = "expert-curated preferred" if curated else "strongest kept"
+        for e in bucket:
+            if e is winner:
+                continue
+            dropped_notes.append(
+                f"{key}: dropped duplicate from {e.source} "
+                f"({e.applied_strength or 'explicit'}) in favor of {winner.source} "
+                f"({winner.applied_strength or 'explicit'}) "
+                f"[ACMG single-application: {basis}]"
+            )
+    return kept, dropped_notes
+
+
+# --------------------------------------------------------------------------- #
 # Classification                                                              #
 # --------------------------------------------------------------------------- #
 def classify(
@@ -128,6 +203,12 @@ def classify(
     config: "Optional[Any]" = None,
 ) -> Classification:
     """Sum standardized evidence into an ACMG/AMP tier. Pure and deterministic.
+
+    Evidence is first normalized for **single-application** (each ACMG criterion is
+    scored at most once; see :func:`collapse_single_application`) so a criterion
+    supplied by both an expert curation and a computational mapper is not
+    double-counted. The reconstruction hash is taken over the original (pre-collapse)
+    evidence, so a stored classification still re-derives exactly from its inputs.
 
     Stable public signature: ``classify(evidence)`` and ``classify(evidence,
     engine_version=...)`` behave exactly as before. The optional ``config`` is a
@@ -144,14 +225,21 @@ def classify(
     contributions: List[Contribution] = []
     overrides: List[str] = []
 
+    # ACMG/AMP single-application: a criterion supplied by more than one source is
+    # scored once (expert-curated preferred, else strongest). The summed evidence is
+    # the deduplicated set; the reconstruction hash below stays over the ORIGINAL
+    # input so a stored classification still re-derives byte-for-byte from its inputs.
+    scored, dropped_notes = collapse_single_application(evidence, strength_points)
+    overrides.extend(dropped_notes)
+
     # Stand-alone benign rule: BA1 alone classifies Benign (ACMG/AMP 2015).
     has_ba1 = any(
         e.acmg_criterion.upper() == "BA1" and e.evidence_direction == "benign"
-        for e in evidence
+        for e in scored
     )
 
     total = 0.0
-    for e in evidence:
+    for e in scored:
         pts = e.signed_points(strength_points)
         total += pts
         contributions.append(
